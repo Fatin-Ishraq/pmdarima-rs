@@ -322,7 +322,10 @@ class ARIMA:
 
         fitted, resid, _, _ = self._forecast(1, None)
         n = self.nobs_
-        lo = d if start is None else int(start)
+        # `pmdarima` defaults to the whole sample, index 0 included, even
+        # though the first d predictions are not meaningful for d > 0. It only
+        # rejects an *explicit* start below d.
+        lo = 0 if start is None else int(start)
         hi = n - 1 if end is None else int(end)
         preds = fitted[lo : hi + 1]
 

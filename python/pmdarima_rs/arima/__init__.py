@@ -1,4 +1,5 @@
 from ._context import AbstractContext, ContextStore, ContextType, StepwiseContext
+from .approx import ARMAtoMA, approx
 from .arima import ARIMA
 from .auto import AutoARIMA, auto_arima
 from .seasonality import CHTest, OCSBTest, decompose
@@ -14,6 +15,8 @@ __all__ = [
     "PPTest",
     "CHTest",
     "OCSBTest",
+    "ARMAtoMA",
+    "approx",
     "decompose",
     "is_constant",
     "ndiffs",
