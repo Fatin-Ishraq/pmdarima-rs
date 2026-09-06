@@ -742,24 +742,60 @@ class _Summary:
 
         order = f"{s.order}"
         sorder = f"x{(s.bp, s.bd, s.bq, s.s)}" if s.s else ""
-        lines = [
-            "                               SARIMAX Results                                ",
-            "=" * 78,
-            f"Dep. Variable:                      y   No. Observations:  {m.nobs_:>15d}",
-            f"Model:               SARIMAX{order}{sorder}   Log Likelihood {m.res_.loglike:>17.3f}",
-            f"                                        AIC            {m.aic():>17.3f}",
-            f"                                        BIC            {m.bic():>17.3f}",
-            f"                                        HQIC           {m.hqic():>17.3f}",
-            "=" * 78,
-            f"{'':>14}{'coef':>10}{'std err':>10}{'z':>9}{'P>|z|':>9}{'[0.025':>10}{'0.975]':>10}",
-            "-" * 78,
+
+        def num(v, width):
+            """Fixed-point where it fits, scientific where it does not.
+
+            `sigma2` is routinely of order 1e7 for un-scaled data, and a
+            fixed `%.4f` at that magnitude runs into the next column and
+            produces an unreadable table.
+            """
+            if not np.isfinite(v):
+                return f"{'nan':>{width}}"
+            txt = f"{v:.4f}"
+            if len(txt) > width - 1:
+                txt = f"{v:.4g}"
+            if len(txt) > width - 1:
+                txt = f"{v:.3e}"
+            return f"{txt:>{width}}"
+
+        name_w = max(14, max((len(n) for n in names), default=0) + 2)
+        total = name_w + 13 + 12 + 10 + 9 + 13 + 13
+
+        spec_txt = f"SARIMAX{order}{sorder}"
+        # Left column is the model description, right column the fit
+        # statistics. A seasonal spec can be 30 characters wide, so it takes a
+        # line of its own rather than shunting the right column out of line.
+        left = [("Dep. Variable:", "y"), ("Model:", spec_txt)]
+        right = [
+            ("No. Observations:", f"{m.nobs_:d}"),
+            ("Log Likelihood", f"{m.res_.loglike:.3f}"),
+            ("AIC", f"{m.aic():.3f}"),
+            ("BIC", f"{m.bic():.3f}"),
+            ("HQIC", f"{m.hqic():.3f}"),
+        ]
+        lw = max(len(k) for k, _ in left) + 2
+        lv = max(len(v) for _, v in left)
+        rw = max(len(k) for k, _ in right) + 2
+        rv = max(len(v) for _, v in right)
+
+        lines = ["SARIMAX Results".center(total), "=" * total]
+        for i in range(max(len(left), len(right))):
+            lhs = f"{left[i][0]:<{lw}}{left[i][1]:<{lv}}" if i < len(left) else " " * (lw + lv)
+            rhs = f"{right[i][0]:<{rw}}{right[i][1]:>{rv}}" if i < len(right) else ""
+            lines.append(f"{lhs}   {rhs}".rstrip())
+        lines += [
+            "=" * total,
+            f"{'':>{name_w}}{'coef':>13}{'std err':>12}{'z':>10}"
+            f"{'P>|z|':>9}{'[0.025':>13}{'0.975]':>13}",
+            "-" * total,
         ]
         for i, nm in enumerate(names):
             lines.append(
-                f"{nm:>14}{p[i]:>10.4f}{se[i]:>10.3f}{z[i]:>9.3f}"
-                f"{pv[i]:>9.3f}{ci[i, 0]:>10.3f}{ci[i, 1]:>10.3f}"
+                f"{nm:>{name_w}}{num(p[i], 13)}{num(se[i], 12)}{num(z[i], 10)}"
+                f"{num(pv[i], 9)}{num(ci[i, 0], 13)}{num(ci[i, 1], 13)}"
             )
-        lines.append("=" * 78)
+        lines.append("=" * total)
         return "\n".join(lines)
 
     __repr__ = __str__
