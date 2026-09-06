@@ -495,3 +495,53 @@ def test_install_aliases_the_package():
 def test_show_versions_runs(capsys):
     pmr.show_versions()
     assert "pmdarima-rs" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("k_exog", [1, 2, 3])
+@pytest.mark.parametrize("order,sorder", [((1, 1, 1), (0, 0, 0, 0)),
+                                          ((2, 1, 1), (0, 1, 1, 12))])
+def test_exogenous_likelihood_is_exact(wine, k_exog, order, sorder):
+    """Exogenous regressors enter as a time-varying observation intercept.
+
+    That is equivalent to subtracting `X beta` from the series, and it is easy
+    to get subtly wrong (column ordering, the intercept interaction), so the
+    likelihood is compared directly against statsmodels rather than only
+    through a fit.
+    """
+    import statsmodels.api as sm
+
+    from pmdarima_rs import _fit as rs_fit
+    from pmdarima_rs._ssm import Spec
+
+    y = np.asarray(wine, dtype=float)
+    n = len(y)
+    rng = np.random.default_rng(0)
+    X = np.column_stack(
+        [np.arange(n) / n] + [rng.standard_normal(n) for _ in range(k_exog - 1)]
+    )
+    ref = sm.tsa.statespace.SARIMAX(
+        y, exog=X, order=order, seasonal_order=sorder, trend="c"
+    )
+    p = ref.start_params
+    spec = Spec(order, sorder, "c", k_exog=k_exog)
+    assert spec.k_params == len(p)
+    a = ref.loglike(p)
+    b = rs_fit.loglike(spec, y, p, exog=X)
+    assert abs(a - b) <= 1e-9 * max(1.0, abs(a))
+
+
+def test_exogenous_fit_and_forecast_match(wine):
+    y = np.asarray(wine, dtype=float)
+    n = len(y)
+    rng = np.random.default_rng(0)
+    X = np.column_stack([np.arange(n) / n, rng.standard_normal(n)])
+    Xf = np.column_stack([np.arange(n, n + 8) / n, rng.standard_normal(8)])
+
+    a = pm.arima.ARIMA(order=(1, 1, 1), suppress_warnings=True).fit(y, X=X)
+    b = pmr.arima.ARIMA(order=(1, 1, 1), suppress_warnings=True).fit(y, X=X)
+    assert abs(b.aic() - a.aic()) <= 1e-6 * abs(a.aic())
+
+    pa = np.asarray(a.predict(n_periods=8, X=Xf), dtype=float)
+    b.res_.params = np.asarray(a.arima_res_.params, dtype=float)
+    pb = np.asarray(b.predict(n_periods=8, X=Xf), dtype=float)
+    assert np.max(np.abs(pa - pb) / np.maximum(1.0, np.abs(pa))) < 1e-10

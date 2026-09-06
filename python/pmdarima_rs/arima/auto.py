@@ -50,11 +50,14 @@ def _check_m(m, seasonal):
 
 def _check_n_jobs(stepwise, n_jobs):
     if stepwise and n_jobs != 1:
-        n_jobs = 1
+        # Report the value the caller passed, not the one we are replacing it
+        # with - a warning that says "n_jobs=1" when you asked for 8 tells you
+        # nothing.
         warnings.warn(
             f"stepwise model cannot be fit in parallel (n_jobs={n_jobs}). "
             "Falling back to stepwise parameter search."
         )
+        n_jobs = 1
     return n_jobs
 
 

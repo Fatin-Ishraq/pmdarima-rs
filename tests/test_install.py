@@ -140,3 +140,31 @@ def test_restarts_never_lower_the_likelihood():
         base = rs_fit.fit(spec, y)
         strong = rs_fit.fit(spec, y, restarts=3, m=20, epsilon=None)
         assert strong.loglike >= base.loglike - 1e-8
+
+
+def test_method_argument_is_honest():
+    """`method` is accepted for compatibility, but we do not pretend.
+
+    Only `lbfgs` is implemented. It is `pmdarima`'s default and the only
+    solver its `auto_arima` ever selects, so this path is rarely trodden - but
+    silently substituting a different optimiser would make a fit that differs
+    look like a bug rather than a documented limitation.
+    """
+    import warnings
+
+    y = pmr.datasets.load_wineind()
+
+    def warned(**kw):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            pmr.arima.ARIMA(order=(1, 1, 1), **kw).fit(y)
+            return any("not implemented" in str(x.message) for x in w)
+
+    assert warned(method="powell")
+    assert not warned(method="lbfgs")
+    # `suppress_warnings` must mean the same thing here as everywhere else.
+    assert not warned(method="powell", suppress_warnings=True)
+
+    # `pmdarima` rejects a None method; so do we.
+    with pytest.raises(ValueError, match="non-None value for `method`"):
+        pmr.arima.ARIMA(order=(1, 1, 1), method=None).fit(y)

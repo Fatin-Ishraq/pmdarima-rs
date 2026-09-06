@@ -22,14 +22,21 @@ import pmdarima as pm  # noqa: E402
 import pmdarima_rs as pmr  # noqa: E402
 
 
-def timeit(fn, repeat=1):
-    fn()  # warm up: first call pays import and allocation costs
-    best = np.inf
+def timed(fn, repeat=1, warmup=False):
+    """Time `fn` and return `(best_seconds, last_result)`.
+
+    Returning the result matters: these workloads take seconds, and running
+    them a second time purely to check agreement would double the benchmark's
+    own runtime for no information.
+    """
+    if warmup:
+        fn()
+    best, out = np.inf, None
     for _ in range(repeat):
         t0 = time.perf_counter()
-        fn()
+        out = fn()
         best = min(best, time.perf_counter() - t0)
-    return best
+    return best, out
 
 
 def synth(n, seed, m=12, kind="sarima"):
@@ -88,8 +95,8 @@ def bench_loglike():
         spec = Spec(order, sorder, "c")
         a, b = ref.loglike(p), rs_fit.loglike(spec, y, p)
         assert abs(a - b) <= 1e-8 * max(1.0, abs(a)), f"disagreement: {a} vs {b}"
-        ta = timeit(lambda: ref.loglike(p), 20)
-        tb = timeit(lambda: rs_fit.loglike(spec, y, p), 200)
+        ta, _ = timed(lambda: ref.loglike(p), 20, warmup=True)
+        tb, _ = timed(lambda: rs_fit.loglike(spec, y, p), 200, warmup=True)
         print(
             f"| {n} | {order} | {sorder} | {ref.k_states} | "
             f"{ta * 1e3:.3f} ms | {tb * 1e3:.3f} ms | **{ta / tb:.1f}x** |"
@@ -118,9 +125,9 @@ def bench_single_fits():
         mk_b = lambda: pmr.arima.ARIMA(  # noqa: E731
             order=order, seasonal_order=sorder, suppress_warnings=True
         ).fit(y)
-        a, b = mk_a(), mk_b()
+        ta, a = timed(mk_a)
+        tb, b = timed(mk_b)
         assert b.aic() <= a.aic() + 1e-6 * abs(a.aic()), "our optimum is worse"
-        ta, tb = timeit(mk_a), timeit(mk_b)
         tot_a += ta
         tot_b += tb
         print(
@@ -142,9 +149,8 @@ def bench_auto_arima(quick=False):
     for name, m in rows:
         y = load(name)
         kw = dict(seasonal=m > 1, m=m, suppress_warnings=True, error_action="ignore")
-        ta = timeit(lambda: pm.auto_arima(y, **kw))
-        tb = timeit(lambda: pmr.auto_arima(y, **kw))
-        a, b = pm.auto_arima(y, **kw), pmr.auto_arima(y, **kw)
+        ta, a = timed(lambda: pm.auto_arima(y, **kw))
+        tb, b = timed(lambda: pmr.auto_arima(y, **kw))
         same = a.order == b.order and tuple(a.seasonal_order) == tuple(b.seasonal_order)
         agree += same
         tot_a += ta

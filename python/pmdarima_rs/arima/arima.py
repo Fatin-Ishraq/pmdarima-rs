@@ -155,6 +155,10 @@ class ARIMA:
         k_exog = 0 if X is None else np.asarray(X).reshape(len(y_arr), -1).shape[1]
         spec = self._build_spec(k_exog)
 
+        method = fit_args.pop("method", self.method)
+        if method is None:
+            raise ValueError("Expected non-None value for `method`")
+
         maxiter = fit_args.pop("maxiter", self.maxiter)
         if maxiter is None:
             raise ValueError("Expected non-None value for `maxiter`")
@@ -164,6 +168,20 @@ class ARIMA:
         with warnings.catch_warnings():
             if self.suppress_warnings:
                 warnings.simplefilter("ignore")
+            if method != "lbfgs":
+                # Say so rather than pretending. `lbfgs` is pmdarima's default
+                # and the only solver its own `auto_arima` selects, so this is
+                # a rarely-trodden path - but silently substituting a
+                # different optimiser would make a differing fit look like a
+                # bug. It sits inside the suppression block so that
+                # `suppress_warnings` means what it does everywhere else.
+                warnings.warn(
+                    f"method={method!r} is not implemented; using 'lbfgs'. It "
+                    "is pmdarima's default and the only method auto_arima "
+                    "uses.",
+                    UserWarning,
+                    stacklevel=3,
+                )
             res = _fitmod.fit(
                 spec,
                 y_arr,
