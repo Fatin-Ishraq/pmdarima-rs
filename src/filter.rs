@@ -31,6 +31,12 @@ pub struct FilterOut {
     pub ssr: f64,
     /// Number of observations contributing to the loglikelihood.
     pub n_eff: usize,
+    /// Per-observation loglikelihood contributions, zero on burned periods.
+    ///
+    /// `statsmodels` reports standard errors from the outer product of
+    /// gradients, which needs the score of each observation separately rather
+    /// than only the total.
+    pub llobs: Vec<f64>,
     /// Final state and covariance, for forecasting.
     pub a_final: Vec<f64>,
     pub p_final: Vec<f64>,
@@ -274,6 +280,7 @@ pub fn kalman_filter(
     let mut fitted = if want_paths { vec![0.0; n] } else { Vec::new() };
     let mut resid = if want_paths { vec![0.0; n] } else { Vec::new() };
     let mut fvar = if want_paths { vec![0.0; n] } else { Vec::new() };
+    let mut llobs = if want_paths { vec![0.0; n] } else { Vec::new() };
 
     for t in 0..n {
         // --- forecast: Z is a 0/1 vector, so Z a is a sum of entries ---
@@ -317,7 +324,11 @@ pub fn kalman_filter(
 
         if !missing && f > 0.0 {
             if t >= spec.burn {
-                loglike += -0.5 * (LN_2PI + f.ln() + v * v / f);
+                let ll_t = -0.5 * (LN_2PI + f.ln() + v * v / f);
+                loglike += ll_t;
+                if want_paths {
+                    llobs[t] = ll_t;
+                }
                 ssr += v * v / f;
                 n_eff += 1;
             }
@@ -385,11 +396,77 @@ pub fn kalman_filter(
         fitted,
         resid,
         fvar,
+        llobs,
         ssr,
         n_eff,
         a_final: a,
         p_final: p,
     }
+}
+
+/// Forecast `h` periods beyond the end of `y`.
+///
+/// Once the filter has run, forecasting is the prediction step alone, with no
+/// observation to correct against: the state mean and covariance simply
+/// propagate. Returns the forecast mean and its variance for each horizon.
+pub fn forecast(
+    spec: &Spec,
+    sys: &System,
+    filtered: &FilterOut,
+    horizon: usize,
+    exog_future: Option<&[f64]>,
+    nobs: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let k = spec.k;
+    let mut a = filtered.a_final.clone();
+    let mut p = filtered.p_final.clone();
+    let mut a_next = vec![0.0; k];
+    let mut tp = vec![0.0; k * k];
+    let mut p_next = vec![0.0; k * k];
+
+    let mut mean = Vec::with_capacity(horizon);
+    let mut var = Vec::with_capacity(horizon);
+
+    for h in 0..horizon {
+        // `a` and `p` already hold the one-step-ahead prediction for this
+        // period, produced by the last iteration of the filter.
+        let mut za = 0.0;
+        for &i in sys.z_idx.iter() {
+            za += a[i];
+        }
+        let d_t = exog_future.map_or(0.0, |e| e[h]);
+        mean.push(za + d_t);
+
+        let mut f = 0.0;
+        for &i in sys.z_idx.iter() {
+            for &j in sys.z_idx.iter() {
+                f += p[i * k + j];
+            }
+        }
+        var.push(f);
+
+        if h + 1 == horizon {
+            break;
+        }
+        for i in 0..k {
+            // A time-varying trend continues past the sample, so the system
+            // is built over `nobs + horizon` periods and indexed absolutely
+            // here rather than repeating the last in-sample value.
+            let mut s = match (&sys.c_time, i == spec.kd) {
+                (Some(ct), true) => ct[(nobs + h).min(ct.len() - 1)],
+                _ => sys.c_const[i],
+            };
+            for &(c, val) in sys.t_rows[i].iter() {
+                s += val * a[c];
+            }
+            a_next[i] = s;
+        }
+        a.copy_from_slice(&a_next);
+        t_times(&sys.t_rows, &p, k, &mut tp);
+        t_p_tt_plus_rqr(&sys.t_rows, &tp, &sys.r_col, sys.sigma2, k, &mut p_next);
+        p.copy_from_slice(&p_next);
+    }
+    (mean, var)
 }
 
 #[cfg(test)]

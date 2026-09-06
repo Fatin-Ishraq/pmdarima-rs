@@ -15,7 +15,7 @@ pub mod poly;
 pub mod ssm;
 
 use filter::kalman_filter;
-use objective::{exog_intercept, loglike_and_grad, loglike_unconstrained};
+use objective::{exog_intercept, loglike_and_grad, loglike_unconstrained, GradKind};
 use ssm::Spec;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -171,7 +171,7 @@ fn loglike_u(
     y, u, order, seasonal_order, trend_powers, exog=None, k_exog=0,
     enforce_stationarity=true, enforce_invertibility=true,
     concentrate_scale=false, diffuse_variance=1e6, tolerance=1e-19,
-    parallel=true
+    parallel=true, epsilon=None
 ))]
 #[allow(clippy::too_many_arguments)]
 fn loglike_grad<'py>(
@@ -189,6 +189,7 @@ fn loglike_grad<'py>(
     diffuse_variance: f64,
     tolerance: f64,
     parallel: bool,
+    epsilon: Option<f64>,
 ) -> PyResult<(f64, Bound<'py, PyArray1<f64>>)> {
     let o = Opts {
         enforce_stationarity,
@@ -203,6 +204,10 @@ fn loglike_grad<'py>(
     let spec = build_spec(order, seasonal_order, trend_powers, k_exog, o);
     // Release the GIL: the gradient fans out over cores and touches nothing
     // Python-owned while it runs.
+    let kind = match epsilon {
+        Some(e) if e > 0.0 => GradKind::Forward(e),
+        _ => GradKind::Central,
+    };
     let (f, g) = py.allow_threads(|| {
         loglike_and_grad(
             &spec,
@@ -212,6 +217,7 @@ fn loglike_grad<'py>(
             diffuse_variance,
             tolerance,
             parallel,
+            kind,
         )
     });
     Ok((f, g.to_pyarray(py)))
@@ -273,6 +279,141 @@ fn filter_paths<'py>(
         out.resid.to_pyarray(py),
         out.fvar.to_pyarray(py),
         out.loglike,
+    ))
+}
+
+/// Per-observation loglikelihood contributions.
+///
+/// Mirrors `statsmodels.SARIMAX.loglikeobs`, and exists for the same reason
+/// statsmodels has it: standard errors come from the outer product of
+/// gradients, which needs each observation's score, not just their sum.
+#[pyfunction]
+#[pyo3(signature = (
+    y, params, order, seasonal_order, trend_powers, exog=None, k_exog=0,
+    enforce_stationarity=true, enforce_invertibility=true,
+    concentrate_scale=false, diffuse_variance=1e6, tolerance=1e-19
+))]
+#[allow(clippy::too_many_arguments)]
+fn loglikeobs<'py>(
+    py: Python<'py>,
+    y: PyReadonlyArray1<f64>,
+    params: PyReadonlyArray1<f64>,
+    order: (usize, usize, usize),
+    seasonal_order: (usize, usize, usize, usize),
+    trend_powers: Vec<usize>,
+    exog: Option<PyReadonlyArray1<f64>>,
+    k_exog: usize,
+    enforce_stationarity: bool,
+    enforce_invertibility: bool,
+    concentrate_scale: bool,
+    diffuse_variance: f64,
+    tolerance: f64,
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    let o = Opts {
+        enforce_stationarity,
+        enforce_invertibility,
+        concentrate_scale,
+        diffuse_variance,
+        tolerance,
+    };
+    let y = y.as_slice()?;
+    let params = params.as_slice()?;
+    let spec = build_spec(order, seasonal_order, trend_powers, k_exog, o);
+    let parts = spec.split(params);
+    let sys = spec.build(&parts, y.len());
+    let ex = exog.as_ref().map(|e| e.as_slice().unwrap());
+    let obs = exog_intercept(&spec, ex, &parts, y.len());
+    let out = kalman_filter(
+        &spec,
+        &sys,
+        y,
+        obs.as_deref(),
+        diffuse_variance,
+        true,
+        tolerance,
+    );
+    Ok(out.llobs.to_pyarray(py))
+}
+
+/// Filter `y`, then forecast `horizon` periods beyond it.
+///
+/// Returns the in-sample one-step forecasts and residuals alongside the
+/// out-of-sample mean and variance, because `pmdarima` callers routinely want
+/// both and running the filter twice would be wasteful.
+#[pyfunction]
+#[pyo3(signature = (
+    y, params, order, seasonal_order, trend_powers, horizon,
+    exog=None, exog_future=None, k_exog=0,
+    enforce_stationarity=true, enforce_invertibility=true,
+    concentrate_scale=false, diffuse_variance=1e6, tolerance=1e-19
+))]
+#[allow(clippy::too_many_arguments)]
+fn forecast<'py>(
+    py: Python<'py>,
+    y: PyReadonlyArray1<f64>,
+    params: PyReadonlyArray1<f64>,
+    order: (usize, usize, usize),
+    seasonal_order: (usize, usize, usize, usize),
+    trend_powers: Vec<usize>,
+    horizon: usize,
+    exog: Option<PyReadonlyArray1<f64>>,
+    exog_future: Option<PyReadonlyArray1<f64>>,
+    k_exog: usize,
+    enforce_stationarity: bool,
+    enforce_invertibility: bool,
+    concentrate_scale: bool,
+    diffuse_variance: f64,
+    tolerance: f64,
+) -> PyResult<(
+    Bound<'py, PyArray1<f64>>,
+    Bound<'py, PyArray1<f64>>,
+    Bound<'py, PyArray1<f64>>,
+    Bound<'py, PyArray1<f64>>,
+)> {
+    let o = Opts {
+        enforce_stationarity,
+        enforce_invertibility,
+        concentrate_scale,
+        diffuse_variance,
+        tolerance,
+    };
+    let y = y.as_slice()?;
+    let n = y.len();
+    let params = params.as_slice()?;
+    let spec = build_spec(order, seasonal_order, trend_powers, k_exog, o);
+    let parts = spec.split(params);
+    // Build over n + horizon so a time-varying trend genuinely covers the
+    // forecast period rather than repeating its last in-sample value.
+    let sys = spec.build(&parts, n + horizon);
+    let ex = exog.as_ref().map(|e| e.as_slice().unwrap());
+    let obs = exog_intercept(&spec, ex, &parts, n);
+    let out = kalman_filter(
+        &spec,
+        &sys,
+        y,
+        obs.as_deref(),
+        diffuse_variance,
+        true,
+        tolerance,
+    );
+    let exf = exog_future.as_ref().map(|e| e.as_slice().unwrap());
+    let obs_future = exf.and_then(|e| {
+        let mut v = vec![0.0; horizon];
+        for (h, slot) in v.iter_mut().enumerate() {
+            let mut acc = 0.0;
+            for j in 0..spec.k_exog {
+                acc += e[j * horizon + h] * parts.exog[j];
+            }
+            *slot = acc;
+        }
+        Some(v)
+    });
+    let (mean, var) = filter::forecast(&spec, &sys, &out, horizon, obs_future.as_deref(), n);
+    Ok((
+        out.fitted.to_pyarray(py),
+        out.resid.to_pyarray(py),
+        mean.to_pyarray(py),
+        var.to_pyarray(py),
     ))
 }
 
@@ -353,6 +494,8 @@ fn _pmdarima_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(loglike_u, m)?)?;
     m.add_function(wrap_pyfunction!(loglike_grad, m)?)?;
     m.add_function(wrap_pyfunction!(filter_paths, m)?)?;
+    m.add_function(wrap_pyfunction!(forecast, m)?)?;
+    m.add_function(wrap_pyfunction!(loglikeobs, m)?)?;
     m.add_function(wrap_pyfunction!(transform_params, m)?)?;
     m.add_function(wrap_pyfunction!(untransform_params, m)?)?;
     m.add_function(wrap_pyfunction!(spec_dims, m)?)?;

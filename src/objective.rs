@@ -86,6 +86,24 @@ fn step_for(x: f64) -> f64 {
     CBRT_EPS * x.abs().max(1.0)
 }
 
+/// How the gradient is approximated.
+#[derive(Clone, Copy, PartialEq)]
+pub enum GradKind {
+    /// Central differences with a per-coordinate step. More accurate.
+    Central,
+    /// Forward differences with a fixed absolute step - what `statsmodels`
+    /// asks `scipy` for (`approx_grad=True, epsilon=1e-5`).
+    ///
+    /// This exists to *match*, not to be good. ARIMA likelihoods routinely
+    /// have their maximum at the invertibility boundary, and `auto_arima`
+    /// discards any model whose fitted inverse roots exceed 0.99. A more
+    /// accurate gradient climbs closer to that boundary and so gets more
+    /// models discarded - which changes which order is selected. Reproducing
+    /// the reference optimiser's blunter gradient is what keeps the search
+    /// on the same path.
+    Forward(f64),
+}
+
 /// Loglikelihood and its gradient with respect to the unconstrained
 /// parameters, in one call.
 ///
@@ -101,26 +119,41 @@ pub fn loglike_and_grad(
     diffuse_variance: f64,
     tolerance: f64,
     parallel: bool,
+    kind: GradKind,
 ) -> (f64, Vec<f64>) {
     let f0 = loglike_unconstrained(spec, y, exog, u, diffuse_variance, tolerance);
     let n = u.len();
 
     let one = |i: usize| -> f64 {
-        let h = step_for(u[i]);
-        let mut up = u.to_vec();
-        let mut dn = u.to_vec();
-        up[i] += h;
-        dn[i] -= h;
-        let fu = loglike_unconstrained(spec, y, exog, &up, diffuse_variance, tolerance);
-        let fd = loglike_unconstrained(spec, y, exog, &dn, diffuse_variance, tolerance);
-        if fu.is_finite() && fd.is_finite() {
-            (fu - fd) / (2.0 * h)
-        } else if fu.is_finite() {
-            (fu - f0) / h
-        } else if fd.is_finite() {
-            (f0 - fd) / h
-        } else {
-            0.0
+        match kind {
+            GradKind::Forward(eps) => {
+                let mut up = u.to_vec();
+                up[i] += eps;
+                let fu = loglike_unconstrained(spec, y, exog, &up, diffuse_variance, tolerance);
+                if fu.is_finite() && f0.is_finite() {
+                    (fu - f0) / eps
+                } else {
+                    0.0
+                }
+            }
+            GradKind::Central => {
+                let h = step_for(u[i]);
+                let mut up = u.to_vec();
+                let mut dn = u.to_vec();
+                up[i] += h;
+                dn[i] -= h;
+                let fu = loglike_unconstrained(spec, y, exog, &up, diffuse_variance, tolerance);
+                let fd = loglike_unconstrained(spec, y, exog, &dn, diffuse_variance, tolerance);
+                if fu.is_finite() && fd.is_finite() {
+                    (fu - fd) / (2.0 * h)
+                } else if fu.is_finite() {
+                    (fu - f0) / h
+                } else if fd.is_finite() {
+                    (f0 - fd) / h
+                } else {
+                    0.0
+                }
+            }
         }
     };
 
