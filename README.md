@@ -161,9 +161,18 @@ rather than golden-file.
   admissible parameter draws, worst relative error **1.7e-9**. A fit that
   happens to land in the right place can hide a filter that is wrong
   everywhere else, so the filter is compared directly.
+- **Series with holes match too.** A missing observation knocks the filter out
+  of its steady state - with nothing to correct against, `P` leaves the fixed
+  point the Riccati recursion had settled on and has to find it again - and
+  `statsmodels` drops its converged flag there for exactly that reason.
+  Reproducing that brings a NaN-bearing series back to **1e-10** agreement;
+  keeping the frozen covariance instead is wrong by several percent of the
+  loglikelihood, which is the kind of error that quietly changes a selected
+  order.
 - **Starting values are exact.** `SARIMAX.start_params` is reproduced
   including its two-stage conditional-sum-of-squares regression and every
-  fallback — worst relative difference **0.0** across 27 specifications. This
+  fallback — worst relative difference **0.0** across 27 specifications, short
+  series and the too-few-observations fallback included. This
   matters more than it looks: ARIMA likelihoods are not concave, so a
   different starting point can reach a different optimum and select a
   different order.
@@ -185,13 +194,21 @@ grows with the time index. At `t = 174` with `m = 12, k = 4` the argument is an
 exact multiple of `2π`, so the sine must be zero: `pmdarima` returns `1.0e-5`,
 we return `6e-14`.
 
-**`sigma2`'s standard error.** Fitting `(2,1,1)` to `wineind` puts `sigma2`
-near `2.9e7`. `statsmodels` differentiates its per-observation loglikelihood
-with a step that does not scale with the parameter, so at that magnitude the
-difference is pure round-off and the reported standard error comes back as
-`1.1e-4`. Recomputing the same outer-product-of-gradients estimator from
-`statsmodels`' *own* `loglikeobs` with a scaled step gives `3.79e6`, and
-complex step gives `3.68e6`. Both agree with us.
+**Standard errors, because of `sigma2`.** Fitting `(2,1,1)` to `wineind` puts
+`sigma2` near `2.9e7`. `statsmodels` differentiates its per-observation
+loglikelihood with a step that does not scale with the parameter, so at that
+magnitude the difference is pure round-off and the reported standard error
+comes back as `1.1e-4`. Recomputing the same outer-product-of-gradients
+estimator from `statsmodels`' *own* `loglikeobs` with a scaled step gives
+`3.79e6`, and complex step gives `3.68e6`. Both agree with us.
+
+That one bad row contaminates the whole covariance: `inv(G'G)` mixes the
+columns, so **every** standard error differs, not only `sigma2`'s — by around
+1-3% on `(2,1,1)`, and by up to 22% on a seasonal `(1,0,1)(1,0,1,4)` where
+`G'G` is badly conditioned to begin with. The `z`, `P>|z|` and `conf_int`
+columns of `summary()` move with them. Our score is taken by a five-point
+central difference with a step scaled to each parameter, which is the closest
+real-arithmetic stand-in for the complex step `statsmodels` uses.
 
 **Fitted optima, sometimes.** For `(1,1,1)(1,0,1,12)` on `wineind`, both
 optimisers exhaust `maxiter=50` still climbing and ours ends 2.0 loglike
@@ -270,13 +287,33 @@ pmdarima_rs.install()      # before the first `import pmdarima`
 import pmdarima            # now resolves to pmdarima_rs
 ```
 
+Every submodule resolves too, including ones nothing has imported yet -
+`install()` puts a finder on `sys.meta_path`, so `import pmdarima.arima.utils`
+or `from pmdarima.datasets.wineind import load_wineind` gets the very same
+module object this package exposes. `isinstance` checks and pickles therefore
+still work across the alias.
+
+One attribute is deliberately not passed through: `pmdarima.__version__`
+reports the `pmdarima` API level this package implements (`2.1.1`), because
+the code you cannot edit is exactly the code likely to gate on it. This
+package's own version stays available as `pmdarima.__pmdarima_rs_version__`
+and as `pmdarima_rs.__version__`.
+
 ## Limitations
 
-- `method` is accepted for compatibility but only `'lbfgs'` is implemented;
-  other solvers fall back to it. It is `pmdarima`'s default and the only one
-  its own `auto_arima` uses.
-- `predict_in_sample(dynamic=True)` is accepted and ignored, as it is in
-  `pmdarima` when confidence intervals are requested.
+- `method` accepts the same nine solver names `statsmodels` does, and rejects
+  anything else with the same `ValueError`. Only `'lbfgs'` is implemented; the
+  other eight warn and fall back to it. It is `pmdarima`'s default and the
+  only one its own `auto_arima` uses.
+- Five `SARIMAX` options raise `NotImplementedError` rather than being
+  accepted and quietly ignored: `simple_differencing`, `measurement_error`,
+  `time_varying_regression`, `mle_regression=False` and `use_exact_diffuse`.
+  Each of them changes the model, so honouring the argument by ignoring it
+  would report a different model's numbers under your specification. Every
+  other `SARIMAX` keyword is either implemented (`enforce_stationarity`,
+  `enforce_invertibility`, `concentrate_scale`, `trend_offset`) or genuinely
+  makes no difference to the likelihood (`hamilton_representation`), and an
+  unrecognised one is a `TypeError`, as it is in `statsmodels`.
 - Order selection agrees with `pmdarima` on real data (10/10). It can differ
   on series whose fitted MA roots sit on the 0.99 rejection threshold, where
   two optimisers agreeing on the likelihood to nine digits still land on
@@ -284,6 +321,12 @@ import pmdarima            # now resolves to pmdarima_rs
   agree 31 times; where they differ our AIC is better on 9 and worse on 8, so
   the disagreement is a coin flip rather than a degradation. It is measured in
   the benchmark rather than asserted away.
+- The same coin flip is louder with `enforce_stationarity=False`, where
+  nothing keeps the roots inside the unit circle and the likelihood is flat
+  along several directions: on `wineind` the two searches part company at
+  `(3,1,2)` over a 0.17 AIC difference and end on different orders. Both
+  libraries evaluate the other's fitted parameters to the same loglikelihood,
+  so this is the optimiser's stopping point, not the filter.
 - The stationary initial covariance is solved by squaring, which is far
   cheaper than the `k² × k²` factorisation it replaces but is still the
   largest fixed cost per likelihood evaluation - about 0.17 ms of a 1.06 ms

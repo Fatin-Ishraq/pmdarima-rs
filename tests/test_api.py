@@ -321,11 +321,15 @@ def test_auto_arima_non_stepwise_matches(wine):
 
 
 def test_auto_arima_returns_all_fits(wine):
-    fits = pmr.auto_arima(
-        wine, seasonal=True, m=12, return_valid_fits=True,
+    kwargs = dict(
+        seasonal=True, m=12, return_valid_fits=True,
         suppress_warnings=True, error_action="ignore",
     )
-    assert isinstance(fits, list) and len(fits) > 1
+    fits = pmr.auto_arima(wine, **kwargs)
+    reference = pm.auto_arima(wine, **kwargs)
+    # pmdarima hands back a tuple, and callers unpack and index it.
+    assert type(fits) is type(reference)
+    assert len(fits) > 1
     aics = [f.aic() for f in fits]
     assert aics == sorted(aics), "valid fits must come back best-first"
 
@@ -481,10 +485,19 @@ def test_install_aliases_the_package():
     import sys
 
     code = (
-        "import pmdarima_rs; pmdarima_rs.install();"
+        "import sys, pmdarima_rs; pmdarima_rs.install();"
         "import pmdarima, pmdarima.arima;"
-        "assert pmdarima is pmdarima_rs, 'alias failed';"
+        # Every name resolves to this package's own object, so `isinstance`
+        # and pickling keep working across the alias...
+        "assert pmdarima.ARIMA is pmdarima_rs.ARIMA, 'alias failed';"
         "assert pmdarima.arima.ARIMA is pmdarima_rs.arima.ARIMA;"
+        # ...including submodules nothing has imported yet.
+        "import pmdarima.arima._validation, pmdarima.compat, pmdarima.base;"
+        "assert sys.modules['pmdarima.compat'] is sys.modules['pmdarima_rs.compat'];"
+        # `__version__` reports the pmdarima API level, so version gates in "
+        # code that cannot be edited keep working.
+        "assert pmdarima.__version__ == pmdarima_rs.PMDARIMA_API_VERSION;"
+        "assert pmdarima.__pmdarima_rs_version__ == pmdarima_rs.__version__;"
         "print('ok')"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)

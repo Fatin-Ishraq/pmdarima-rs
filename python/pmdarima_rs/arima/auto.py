@@ -11,92 +11,31 @@ import warnings
 
 import numpy as np
 
+from ..base import BaseARIMA
+from ..compat.sklearn import NotFittedError
+from ..compat.statsmodels import check_seasonal_order
 from ..utils.array import check_endog, check_exog, diff, is_iterable
 from . import _auto_solvers as solvers
+from . import _validation as val
 from .utils import is_constant, ndiffs, nsdiffs
 
 __all__ = ["auto_arima", "AutoARIMA", "StepwiseContext"]
 
 from ._context import StepwiseContext  # noqa: E402,F401  (re-exported)
 
-VALID_CRITERIA = ("aic", "bic", "hqic", "oob", "aicc")
-
-
-def _check_kwargs(kw):
-    return {} if not kw else dict(kw)
-
-
-def _auto_intercept(with_intercept, default):
-    return default if with_intercept == "auto" else with_intercept
-
-
-def _check_trace(trace):
-    if trace is None:
-        return 0
-    if isinstance(trace, (int, bool, np.integer)):
-        return int(trace)
-    return 1 if trace else 0
-
-
-def _check_m(m, seasonal):
-    if (m < 1 and seasonal) or m < 0:
-        raise ValueError("m must be a positive integer (> 0)")
-    if not seasonal:
-        if m > 1:
-            warnings.warn(f"m ({m}) set for non-seasonal fit. Setting to 0")
-        m = 0
-    return m
-
-
-def _check_n_jobs(stepwise, n_jobs):
-    if stepwise and n_jobs != 1:
-        # Report the value the caller passed, not the one we are replacing it
-        # with - a warning that says "n_jobs=1" when you asked for 8 tells you
-        # nothing.
-        warnings.warn(
-            f"stepwise model cannot be fit in parallel (n_jobs={n_jobs}). "
-            "Falling back to stepwise parameter search."
-        )
-        n_jobs = 1
-    return n_jobs
-
-
-def _check_start_max_values(st, mx, argname):
-    if mx is None:
-        mx = np.inf
-    if st is None:
-        raise ValueError(f"start_{argname} cannot be None")
-    if st < 0:
-        raise ValueError(f"start_{argname} must be positive")
-    if mx < st:
-        raise ValueError(f"max_{argname} must be >= start_{argname}")
-    return st, mx
-
-
-def _check_information_criterion(information_criterion, out_of_sample_size):
-    if information_criterion not in VALID_CRITERIA:
-        raise ValueError(
-            f"auto_arima not defined for information_criteria="
-            f"{information_criterion}. Valid information criteria include: "
-            f"{list(VALID_CRITERIA)!r}"
-        )
-    if information_criterion == "oob" and out_of_sample_size == 0:
-        information_criterion = "aic"
-        warnings.warn(
-            "information_criterion cannot be 'oob' with out_of_sample_size=0. "
-            "Falling back to information_criterion='aic'."
-        )
-    return information_criterion
+VALID_CRITERIA = val.VALID_CRITERIA
 
 
 def _return_wrapper(fits, return_all, start, trace):
+    """Return the best fit, or all of them, as `pmdarima` shapes it."""
     if not is_iterable(fits):
         fits = [fits]
     if trace:
         print("Total fit time: %.3f seconds" % (time.time() - start))
     if not return_all:
         return fits[0]
-    return fits
+    # `pmdarima` hands back a tuple here, and callers unpack and index it.
+    return tuple(fits)
 
 
 def auto_arima(
@@ -147,19 +86,19 @@ def auto_arima(
     """Automatically discover the optimal ARIMA order for a series."""
     import functools
 
-    offset_test_args = _check_kwargs(offset_test_args)
-    seasonal_test_args = _check_kwargs(seasonal_test_args)
-    scoring_args = _check_kwargs(scoring_args)
-    sarimax_kwargs = _check_kwargs(sarimax_kwargs)
+    offset_test_args = val.check_kwargs(offset_test_args)
+    seasonal_test_args = val.check_kwargs(seasonal_test_args)
+    scoring_args = val.check_kwargs(scoring_args)
+    sarimax_kwargs = val.check_kwargs(sarimax_kwargs)
 
-    m = _check_m(m, seasonal)
-    trace = _check_trace(trace)
-    n_jobs = _check_n_jobs(stepwise, n_jobs)
+    m = val.check_m(m, seasonal)
+    trace = val.check_trace(trace)
+    n_jobs = val.check_n_jobs(stepwise, n_jobs)
 
-    start_p, max_p = _check_start_max_values(start_p, max_p, "p")
-    start_q, max_q = _check_start_max_values(start_q, max_q, "q")
-    start_P, max_P = _check_start_max_values(start_P, max_P, "P")
-    start_Q, max_Q = _check_start_max_values(start_Q, max_Q, "Q")
+    start_p, max_p = val.check_start_max_values(start_p, max_p, "p")
+    start_q, max_q = val.check_start_max_values(start_q, max_q, "q")
+    start_P, max_P = val.check_start_max_values(start_P, max_P, "P")
+    start_Q, max_Q = val.check_start_max_values(start_Q, max_Q, "Q")
 
     for _d, _max_d in ((d, max_d), (D, max_D)):
         if _max_d < 0:
@@ -168,10 +107,10 @@ def auto_arima(
             raise ValueError("d & D must be None or a positive integer (>= 0)")
     if random and n_fits < 0:
         raise ValueError("n_fits must be a positive integer for a random search")
-    if error_action not in {"warn", "raise", "ignore", "trace", None}:
+    actions = {"warn", "raise", "ignore", "trace", None}
+    if error_action not in actions:
         raise ValueError(
-            "error_action must be one of {'warn','raise','ignore','trace',None}, "
-            f"but got {error_action!r}"
+            "error_action must be one of %r, but got %r" % (actions, error_action)
         )
 
     start = time.time()
@@ -207,7 +146,7 @@ def auto_arima(
                     X=X,
                     order=(0, 0, 0),
                     seasonal_order=(0, 0, 0, 0),
-                    with_intercept=_auto_intercept(with_intercept, False),
+                    with_intercept=val.auto_intercept(with_intercept, False),
                     **sarimax_kwargs,
                 )
             ),
@@ -216,7 +155,7 @@ def auto_arima(
             trace,
         )
 
-    information_criterion = _check_information_criterion(
+    information_criterion = val.check_information_criterion(
         information_criterion, out_of_sample_size
     )
 
@@ -269,19 +208,22 @@ def auto_arima(
             if np.apply_along_axis(is_constant, arr=diffxreg, axis=0).any():
                 d -= 1
 
+    if not suppress_warnings:
+        val.warn_for_D(d=d, D=D)
+
     if d > 0:
         dx = diff(dx, differences=d, lag=1)
 
     if is_constant(dx):
-        ssn = (0, 0, 0, 0) if not seasonal else (0, D, 0, m)
+        ssn = (0, 0, 0, 0) if not seasonal else check_seasonal_order((0, D, 0, m))
         if D > 0 and d == 0:
-            with_intercept = _auto_intercept(with_intercept, True)
+            with_intercept = val.auto_intercept(with_intercept, True)
         elif D > 0 and d > 0:
             pass
         elif d == 2:
             pass
         elif d < 2:
-            with_intercept = _auto_intercept(with_intercept, True)
+            with_intercept = val.auto_intercept(with_intercept, True)
         else:
             raise ValueError(
                 "data follow a simple polynomial and are not suitable for "
@@ -379,59 +321,176 @@ def auto_arima(
     return _return_wrapper(sorted_res, return_valid_fits, start, trace)
 
 
-class AutoARIMA:
-    """An sklearn-style estimator wrapping :func:`auto_arima`."""
+class AutoARIMA(BaseARIMA):
+    """An estimator wrapping :func:`auto_arima`.
 
-    def __init__(self, maxiter=50, method="lbfgs", **kwargs):
-        self.maxiter = maxiter
+    Every `auto_arima` argument is a constructor argument, so the estimator
+    can be cloned, grid-searched and introspected the way `pmdarima`'s can.
+    """
+
+    def __init__(
+        self,
+        start_p=2,
+        d=None,
+        start_q=2,
+        max_p=5,
+        max_d=2,
+        max_q=5,
+        start_P=1,
+        D=None,
+        start_Q=1,
+        max_P=2,
+        max_D=1,
+        max_Q=2,
+        max_order=5,
+        m=1,
+        seasonal=True,
+        stationary=False,
+        information_criterion="aic",
+        alpha=0.05,
+        test="kpss",
+        seasonal_test="ocsb",
+        stepwise=True,
+        n_jobs=1,
+        start_params=None,
+        trend=None,
+        method="lbfgs",
+        maxiter=50,
+        offset_test_args=None,
+        seasonal_test_args=None,
+        suppress_warnings=True,
+        error_action="trace",
+        trace=False,
+        random=False,
+        random_state=None,
+        n_fits=10,
+        out_of_sample_size=0,
+        scoring="mse",
+        scoring_args=None,
+        with_intercept="auto",
+        **kwargs,
+    ):
+        self.start_p = start_p
+        self.d = d
+        self.start_q = start_q
+        self.max_p = max_p
+        self.max_d = max_d
+        self.max_q = max_q
+        self.start_P = start_P
+        self.D = D
+        self.start_Q = start_Q
+        self.max_P = max_P
+        self.max_D = max_D
+        self.max_Q = max_Q
+        self.max_order = max_order
+        self.m = m
+        self.seasonal = seasonal
+        self.stationary = stationary
+        self.information_criterion = information_criterion
+        self.alpha = alpha
+        self.test = test
+        self.seasonal_test = seasonal_test
+        self.stepwise = stepwise
+        self.n_jobs = n_jobs
+        self.start_params = start_params
+        self.trend = trend
         self.method = method
+        self.maxiter = maxiter
+        self.offset_test_args = offset_test_args
+        self.seasonal_test_args = seasonal_test_args
+        self.suppress_warnings = suppress_warnings
+        self.error_action = error_action
+        self.trace = trace
+        self.random = random
+        self.random_state = random_state
+        self.n_fits = n_fits
+        self.out_of_sample_size = out_of_sample_size
+        self.scoring = scoring
+        self.scoring_args = scoring_args
+        self.with_intercept = with_intercept
+
+        for deprecated in ("solver", "transparams"):
+            if kwargs.pop(deprecated, None):
+                warnings.warn(
+                    "%s has been deprecated and will be removed in a future "
+                    "version." % deprecated,
+                    DeprecationWarning,
+                )
         self.kwargs = kwargs
 
+    _AUTO_PARAMS = (
+        "start_p", "d", "start_q", "max_p", "max_d", "max_q", "start_P", "D",
+        "start_Q", "max_P", "max_D", "max_Q", "max_order", "m", "seasonal",
+        "stationary", "information_criterion", "alpha", "test",
+        "seasonal_test", "stepwise", "n_jobs", "start_params", "trend",
+        "method", "maxiter", "offset_test_args", "seasonal_test_args",
+        "suppress_warnings", "error_action", "trace", "random",
+        "random_state", "n_fits", "out_of_sample_size", "scoring",
+        "scoring_args", "with_intercept",
+    )
+
+    def get_params(self, deep=True):
+        return {k: getattr(self, k) for k in self._AUTO_PARAMS}
+
+    def set_params(self, **params):
+        for k, v in params.items():
+            if k in self._AUTO_PARAMS:
+                setattr(self, k, v)
+            else:
+                self.kwargs[k] = v
+        return self
+
     def fit(self, y, X=None, **fit_args):
+        """Fit an `auto_arima` search and keep the winning model."""
+        sarimax_kwargs = {} if not self.kwargs else self.kwargs
         self.model_ = auto_arima(
-            y, X=X, maxiter=self.maxiter, method=self.method, **self.kwargs, **fit_args
+            y,
+            X=X,
+            **{k: getattr(self, k) for k in self._AUTO_PARAMS},
+            return_valid_fits=False,
+            sarimax_kwargs=sarimax_kwargs,
+            **fit_args,
         )
         return self
 
     def _check_fitted(self):
         if not hasattr(self, "model_"):
-            raise ValueError(
-                "This AutoARIMA instance is not fitted yet. Call 'fit' with "
-                "appropriate arguments before using this estimator."
-            )
+            raise NotFittedError("Model has not been fit!")
 
-    def predict(self, n_periods=10, X=None, return_conf_int=False, alpha=0.05, **kw):
+    def predict(self, n_periods=10, X=None, return_conf_int=False, alpha=0.05):
         self._check_fitted()
         return self.model_.predict(
             n_periods=n_periods,
             X=X,
             return_conf_int=return_conf_int,
             alpha=alpha,
-            **kw,
         )
 
-    def predict_in_sample(self, X=None, **kw):
+    def predict_in_sample(
+        self,
+        X=None,
+        start=None,
+        end=None,
+        dynamic=False,
+        return_conf_int=False,
+        alpha=0.05,
+        typ="levels",
+    ):
         self._check_fitted()
-        return self.model_.predict_in_sample(X=X, **kw)
+        return self.model_.predict_in_sample(
+            X=X,
+            start=start,
+            end=end,
+            dynamic=dynamic,
+            return_conf_int=return_conf_int,
+            alpha=alpha,
+        )
 
-    def update(self, y, X=None, maxiter=None, **kw):
+    def update(self, y, X=None, maxiter=None, **kwargs):
         self._check_fitted()
-        self.model_.update(y, X=X, maxiter=maxiter, **kw)
+        self.model_.update(y, X=X, maxiter=maxiter, **kwargs)
         return self
 
     def summary(self):
         self._check_fitted()
         return self.model_.summary()
-
-    def get_params(self, deep=True):
-        out = {"maxiter": self.maxiter, "method": self.method}
-        out.update(self.kwargs)
-        return out
-
-    def set_params(self, **params):
-        for k, v in params.items():
-            if k in ("maxiter", "method"):
-                setattr(self, k, v)
-            else:
-                self.kwargs[k] = v
-        return self

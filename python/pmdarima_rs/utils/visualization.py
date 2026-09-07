@@ -34,9 +34,11 @@ def _show_or_return(fig, show):
     return fig
 
 
-def _corr_plot(values, ax, lags, alpha, title, zero, use_vlines, vlines_kwargs, show):
+def _corr_plot(
+    values, confint, ax, lags, alpha, title, zero, use_vlines, vlines_kwargs, show, kwargs
+):
+    """Draw a correlogram with optional Bartlett confidence bands."""
     plt = _mpl()
-    fig = None
     if ax is None:
         fig, ax = plt.subplots(1, 1)
     else:
@@ -45,6 +47,8 @@ def _corr_plot(values, ax, lags, alpha, title, zero, use_vlines, vlines_kwargs, 
     values = np.asarray(values, dtype=float)
     if not zero:
         values = values[1:]
+        if confint is not None:
+            confint = confint[1:]
         x = np.arange(1, len(values) + 1)
     else:
         x = np.arange(len(values))
@@ -52,12 +56,22 @@ def _corr_plot(values, ax, lags, alpha, title, zero, use_vlines, vlines_kwargs, 
     if use_vlines:
         ax.vlines(x, [0], values, **(vlines_kwargs or {}))
         ax.axhline(y=0, color="k")
+    kwargs.setdefault("marker", "o")
+    kwargs.setdefault("markersize", 5)
+    kwargs.setdefault("linestyle", "None")
     ax.margins(0.05)
-    ax.plot(x, values, "o", markersize=5)
+    ax.plot(x, values, **kwargs)
     ax.set_title(title)
-    if alpha is not None:
-        # The usual +/- 1.96/sqrt(n) band, drawn from the supplied interval.
-        pass
+
+    if confint is not None:
+        # The band is drawn around zero, and the lag-0 spike is dropped from
+        # it, which is what statsmodels' plot does.
+        lo = confint[:, 0] - values
+        hi = confint[:, 1] - values
+        first = 1 if zero else 0
+        ax.fill_between(
+            x[first:], lo[first:], hi[first:], alpha=0.25, color="tab:blue"
+        )
     return _show_or_return(fig, show)
 
 
@@ -78,8 +92,12 @@ def plot_acf(
     """Plot the autocorrelation function of a series."""
     from .wrapped import acf
 
-    vals = acf(series, nlags=lags, fft=fft, adjusted=unbiased)
-    return _corr_plot(vals, ax, lags, alpha, title, zero, use_vlines, vlines_kwargs, show)
+    out = acf(series, nlags=lags, fft=fft, adjusted=unbiased, alpha=alpha)
+    vals, confint = out if alpha is not None else (out, None)
+    return _corr_plot(
+        vals, confint, ax, lags, alpha, title, zero, use_vlines, vlines_kwargs,
+        show, kwargs,
+    )
 
 
 def plot_pacf(
@@ -98,8 +116,12 @@ def plot_pacf(
     """Plot the partial autocorrelation function of a series."""
     from .wrapped import pacf
 
-    vals = pacf(series, nlags=lags, method=method)
-    return _corr_plot(vals, ax, lags, alpha, title, zero, use_vlines, vlines_kwargs, show)
+    out = pacf(series, nlags=lags, method=method, alpha=alpha)
+    vals, confint = out if alpha is not None else (out, None)
+    return _corr_plot(
+        vals, confint, ax, lags, alpha, title, zero, use_vlines, vlines_kwargs,
+        show, kwargs,
+    )
 
 
 def autocorr_plot(series, show=True):
@@ -137,8 +159,15 @@ def tsdisplay(
 ):
     """The series, its histogram, and its autocorrelation, in one figure."""
     plt = _mpl()
+    from .array import check_endog
     from .wrapped import acf
 
+    y = check_endog(y, copy=False, preserve_series=True)
+    if lag_max >= y.shape[0]:
+        raise ValueError(
+            f"lag_max ({lag_max}) must be < length of the "
+            f"series ({y.shape[0]})"
+        )
     y = np.asarray(y, dtype=float).ravel()
     fig = plt.figure(figsize=figsize)
     ax1 = fig.add_subplot(211)

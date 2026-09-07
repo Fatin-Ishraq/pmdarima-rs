@@ -14,6 +14,7 @@ from itertools import islice
 import pandas as pd
 
 from .arima.arima import ARIMA
+from .base import BaseARIMA
 from .preprocessing.base import BaseTransformer, check_is_fitted
 from .preprocessing.endog.base import BaseEndogTransformer
 from .preprocessing.exog.base import BaseExogFeaturizer, BaseExogTransformer
@@ -40,7 +41,9 @@ def _clone(estimator):
     return copy.deepcopy(estimator)
 
 
-class Pipeline:
+class Pipeline(BaseARIMA):
+    """A chain of transformers ending in an ARIMA."""
+
     def __init__(self, steps):
         self.steps = steps
         self._validate_steps()
@@ -48,6 +51,14 @@ class Pipeline:
     def _validate_names(self, names):
         if len(set(names)) != len(names):
             raise ValueError(f"Names provided are not unique: {list(names)!r}")
+        # A step named after a constructor argument would make `step__param`
+        # ambiguous, so scikit-learn rejects it and so does pmdarima.
+        invalid_names = set(names).intersection(self.get_params(deep=False))
+        if invalid_names:
+            raise ValueError(
+                "Estimator names conflict with constructor arguments: "
+                f"{sorted(invalid_names)!r}"
+            )
         invalid = [name for name in names if "__" in name]
         if invalid:
             raise ValueError(f"Estimator names must not contain __: got {invalid!r}")
@@ -103,9 +114,6 @@ class Pipeline:
         if exog is not None and len(exog) != n_periods:
             n_periods = len(exog)
         return n_periods
-
-    def get_params(self, deep=True):
-        return {"steps": self.steps}
 
     def set_params(self, **params):
         if "steps" in params:
@@ -243,6 +251,3 @@ class Pipeline:
         nm, est = self.steps_[-1]
         return est.update(yt, X=Xt, maxiter=maxiter, **named_kwargs[nm])
 
-    def __repr__(self):
-        inner = ", ".join(f"({n!r}, {e!r})" for n, e in self.steps)
-        return f"Pipeline(steps=[{inner}])"

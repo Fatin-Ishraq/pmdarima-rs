@@ -107,3 +107,21 @@ def load_msft():
         # Volume and OpenInt are counts in the original, not prices.
         out[c] = col.astype(np.int64) if c in ("Volume", "OpenInt") else col
     return out[cols]
+
+
+# `pmdarima` gives every dataset a module as well as a loader, and both are
+# reachable as attributes of this package. These sit at the bottom because
+# each one imports the loader defined above.
+from . import (  # noqa: E402,F401
+    airpassengers,
+    ausbeer,
+    austres,
+    gasoline,
+    heartrate,
+    lynx,
+    stocks,
+    sunspots,
+    taylor,
+    wineind,
+    woolyrnq,
+)

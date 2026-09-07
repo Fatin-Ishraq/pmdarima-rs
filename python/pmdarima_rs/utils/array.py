@@ -38,17 +38,40 @@ def c(*args):
     return np.concatenate([a if is_iterable(a) else [a] for a in args])
 
 
-def as_series(x):
+def as_series(x, **kwargs):
     if isinstance(x, pd.Series):
         return x
     if isinstance(x, pd.DataFrame):
         if x.shape[1] != 1:
             raise ValueError("cannot convert a multi-column DataFrame to a Series")
         return x[x.columns[0]]
-    return pd.Series(np.asarray(x).ravel())
+    return pd.Series(np.asarray(x).ravel(), **kwargs)
 
 
-def check_endog(y, dtype=np.float64, copy=True, force_all_finite=False, preserve_series=True):
+def _assert_all_finite(arr, name=""):
+    """Reject NaN/inf with `sklearn`'s wording.
+
+    `pmdarima` rejects these too, but only once the array reaches a
+    scikit-learn regression deep inside a unit-root test. Callers match on the
+    message, so it is reproduced rather than reworded.
+    """
+    if arr.size and not np.all(np.isfinite(arr)):
+        prefix = f"Input {name} contains" if name else "Input contains"
+        if np.isnan(arr).any():
+            raise ValueError(f"{prefix} NaN.")
+        raise ValueError(
+            f"{prefix} infinity or a value too large for dtype('float64')."
+        )
+
+
+def check_endog(
+    y,
+    dtype=np.float64,
+    copy=True,
+    force_all_finite=False,
+    preserve_series=True,
+    input_name="",
+):
     """Validate a series and return it as a 1-D array (or Series).
 
     `force_all_finite=False` is the default on purpose: the Kalman filter
@@ -65,10 +88,13 @@ def check_endog(y, dtype=np.float64, copy=True, force_all_finite=False, preserve
         arr = np.asarray(out, dtype=dtype)
         if arr.ndim != 1:
             raise ValueError("y must be one-dimensional")
-        if force_all_finite and not np.all(np.isfinite(arr)):
-            raise ValueError("y contains non-finite values")
+        if force_all_finite:
+            _assert_all_finite(arr, input_name)
         if arr.shape[0] < 1:
-            raise ValueError("y is empty")
+            raise ValueError(
+                f"Found array with 0 sample(s) (shape={arr.shape}) while a "
+                "minimum of 1 is required."
+            )
         return pd.Series(arr, index=out.index, name=getattr(out, "name", None))
 
     arr = np.asarray(y, dtype=dtype)
@@ -76,28 +102,40 @@ def check_endog(y, dtype=np.float64, copy=True, force_all_finite=False, preserve
         arr = arr.ravel()
     if arr.ndim != 1:
         raise ValueError("y must be one-dimensional")
-    if force_all_finite and not np.all(np.isfinite(arr)):
-        raise ValueError("y contains non-finite values")
+    if force_all_finite:
+        _assert_all_finite(arr, input_name)
     if arr.shape[0] < 1:
-        raise ValueError("y is empty")
+        raise ValueError(
+            f"Found array with 0 sample(s) (shape={arr.shape}) while a "
+            "minimum of 1 is required."
+        )
     return arr.copy() if copy else arr
 
 
 def check_exog(X, dtype=np.float64, copy=True, force_all_finite=True):
     """Validate exogenous regressors into a 2-D array or DataFrame."""
+    # `pmdarima` rejects anything that already knows it is not 2-D, but lets
+    # a bare list through to be coerced. A 1-D array is an error there, not a
+    # column vector, and code that relies on that check has to keep seeing it.
+    if hasattr(X, "ndim") and X.ndim != 2:
+        raise ValueError("Must be a 2-d array or dataframe")
     if isinstance(X, pd.DataFrame):
-        out = X.copy() if copy else X
-        arr = np.asarray(out, dtype=dtype)
-        if force_all_finite and not np.all(np.isfinite(arr)):
-            raise ValueError("X contains non-finite values")
+        out = X.astype(dtype) if (copy and dtype is not None) else X
+        if force_all_finite:
+            _assert_all_finite(np.asarray(out, dtype=float), "X")
         return out
     arr = np.asarray(X, dtype=dtype)
     if arr.ndim == 1:
         arr = arr.reshape(-1, 1)
     if arr.ndim != 2:
-        raise ValueError("X must be two-dimensional")
-    if force_all_finite and not np.all(np.isfinite(arr)):
-        raise ValueError("X contains non-finite values")
+        raise ValueError("Must be a 2-d array or dataframe")
+    if arr.shape[0] < 1:
+        raise ValueError(
+            f"Found array with 0 sample(s) (shape={arr.shape}) while a "
+            "minimum of 1 is required."
+        )
+    if force_all_finite:
+        _assert_all_finite(arr, "X")
     return arr.copy() if copy else arr
 
 

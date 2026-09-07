@@ -22,10 +22,13 @@ good to about ten. L-BFGS reconstructs curvature from *differences* of
 gradients, so that noise is what makes it stall short of the optimum.
 """
 
+import warnings
+
 import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
 
 from . import _pmdarima_rs as _rs
+from .warnings import ConvergenceWarning
 
 
 class FitResult:
@@ -43,9 +46,11 @@ class FitResult:
         "n_fev",
         "message",
         "spec",
+        "scale",
     )
 
     def __init__(self, **kw):
+        kw.setdefault("scale", 1.0)
         for k in self.__slots__:
             setattr(self, k, kw.get(k))
 
@@ -79,6 +84,7 @@ def _rs_kwargs(spec, exog_flat):
         trend_powers=list(spec.trend_powers),
         exog=exog_flat,
         k_exog=spec.k_exog,
+        trend_offset=spec.trend_offset,
         enforce_stationarity=spec.enforce_stationarity,
         enforce_invertibility=spec.enforce_invertibility,
         concentrate_scale=spec.concentrate_scale,
@@ -176,7 +182,7 @@ def fit(
             loglike=ll,
             nobs=nobs,
             nobs_effective=nobs - spec.loglikelihood_burn,
-            df_model=0,
+            df_model=int(spec.concentrate_scale),
             converged=True,
             n_iter=0,
             n_fev=1,
@@ -189,6 +195,7 @@ def fit(
         seasonal_order=(spec.bp, spec.bd, spec.bq, spec.s),
         trend_powers=list(spec.trend_powers),
         k_exog=spec.k_exog,
+        trend_offset=spec.trend_offset,
         enforce_stationarity=spec.enforce_stationarity,
         enforce_invertibility=spec.enforce_invertibility,
         concentrate_scale=spec.concentrate_scale,
@@ -240,7 +247,7 @@ def fit(
             loglike=-np.inf,
             nobs=nobs,
             nobs_effective=nobs - spec.loglikelihood_burn,
-            df_model=k_params,
+            df_model=k_params + int(spec.concentrate_scale),
             converged=False,
             n_iter=0,
             n_fev=calls["n"],
@@ -251,12 +258,33 @@ def fit(
     params = _rs.transform_params(np.ascontiguousarray(u_opt), **tk)
     ll = _rs.loglike(y, params, **kw)
 
-    # The optimiser works on -loglike/nobs; if it somehow ended worse than it
-    # started, keep the better point. This costs one extra evaluation and
-    # removes a class of silent regressions.
-    ll0 = _rs.loglike(y, start_params, **kw)
-    if np.isfinite(ll0) and (not np.isfinite(ll) or ll0 > ll):
-        params, ll, u_opt = start_params, ll0, u0
+    # statsmodels reports the point the optimiser stopped at, and `pmdarima`
+    # compares information criteria across candidates on that basis. Silently
+    # substituting the starting values when they happen to score better would
+    # make this model incomparable with the reference for the same data.
+    converged = info.get("warnflag", 1) == 0
+    if not converged:
+        warnings.warn(
+            "Maximum Likelihood optimization failed to converge. "
+            "Check mle_retvals",
+            ConvergenceWarning,
+            stacklevel=2,
+        )
+
+    scale = 1.0
+    if spec.concentrate_scale and np.isfinite(ll):
+        scale = _rs.concentrated_scale(
+            y,
+            params,
+            spec.order,
+            (spec.bp, spec.bd, spec.bq, spec.s),
+            list(spec.trend_powers),
+            exog=exog_flat,
+            k_exog=spec.k_exog,
+            trend_offset=spec.trend_offset,
+            enforce_stationarity=spec.enforce_stationarity,
+            enforce_invertibility=spec.enforce_invertibility,
+        )
 
     return FitResult(
         params=np.asarray(params, dtype=float),
@@ -264,8 +292,9 @@ def fit(
         loglike=float(ll),
         nobs=nobs,
         nobs_effective=nobs - spec.loglikelihood_burn,
-        df_model=k_params,
-        converged=info.get("warnflag", 1) == 0,
+        df_model=k_params + int(spec.concentrate_scale),
+        converged=converged,
+        scale=scale,
         n_iter=n_iter,
         n_fev=calls["n"],
         message=(info.get("task", b"") or b"").decode()

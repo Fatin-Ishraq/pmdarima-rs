@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 //! The Kalman filter, specialised to the SARIMAX structure.
 //!
 //! Two things make this cheaper than a general filter without changing a
@@ -29,8 +30,12 @@ pub struct FilterOut {
     pub fvar: Vec<f64>,
     /// `sum v_t^2 / F_t` over the non-burned observations.
     pub ssr: f64,
+    /// `sum log F_t` over the non-burned observations.
+    pub sum_log_f: f64,
     /// Number of observations contributing to the loglikelihood.
     pub n_eff: usize,
+    /// The profiled-out scale, when `concentrate_scale` is set; else 1.
+    pub scale: f64,
     /// Per-observation loglikelihood contributions, zero on burned periods.
     ///
     /// `statsmodels` reports standard errors from the outer product of
@@ -240,6 +245,7 @@ pub fn initial_covariance(spec: &Spec, sys: &System, diffuse_variance: f64) -> V
 ///
 /// `y` may contain NaN for missing observations; those periods skip the
 /// update and only propagate, which matches `statsmodels`' handling.
+#[allow(clippy::too_many_arguments)]
 pub fn kalman_filter(
     spec: &Spec,
     sys: &System,
@@ -276,6 +282,7 @@ pub fn kalman_filter(
 
     let mut loglike = 0.0;
     let mut ssr = 0.0;
+    let mut sum_log_f = 0.0;
     let mut n_eff = 0usize;
     let mut fitted = if want_paths { vec![0.0; n] } else { Vec::new() };
     let mut resid = if want_paths { vec![0.0; n] } else { Vec::new() };
@@ -291,6 +298,22 @@ pub fn kalman_filter(
         let d_t = obs_intercept.map_or(0.0, |o| o[t]);
         let forecast = za + d_t;
         let v = y[t] - forecast;
+
+        // Only NaN marks a missing observation, exactly as `numpy.isnan`
+        // decides it for statsmodels. An infinite `y` or an overflowed
+        // forecast is *not* missing: it has to poison the likelihood rather
+        // than be quietly skipped, or an explosive model scores as a good one.
+        let missing = y[t].is_nan();
+
+        // A missing observation invalidates the steady state: with no
+        // observation to correct against, `P_{t|t} = P_t` rather than
+        // `P_t - M M'/F`, so the Riccati recursion leaves its fixed point and
+        // has to find it again. statsmodels drops the converged flag here and
+        // re-converges a few periods later; matching that is what keeps the
+        // likelihood equal when the series has holes.
+        if missing {
+            converged = false;
+        }
 
         // --- M = P Z', F = Z P Z' ---
         // Once converged these are constant, so we skip the O(k) sweep and
@@ -315,7 +338,6 @@ pub fn kalman_filter(
             f = acc;
         }
 
-        let missing = !v.is_finite();
         if want_paths {
             fitted[t] = forecast;
             resid[t] = v;
@@ -330,6 +352,7 @@ pub fn kalman_filter(
                     llobs[t] = ll_t;
                 }
                 ssr += v * v / f;
+                sum_log_f += f.ln();
                 n_eff += 1;
             }
             // --- contemporaneous update: rank-1, no inversion ---
@@ -348,6 +371,13 @@ pub fn kalman_filter(
                 }
             }
         } else {
+            if !missing && t >= spec.burn {
+                // A non-positive or NaN prediction variance is a degenerate
+                // model, not a missing observation. Poison the likelihood so
+                // the caller scores it as unusable instead of silently
+                // dropping the period and reporting a better fit than it has.
+                loglike = f64::NAN;
+            }
             a_filt.copy_from_slice(&a);
             if !converged {
                 p_filt.copy_from_slice(&p);
@@ -375,7 +405,7 @@ pub fn kalman_filter(
             // statsmodels compares the squared Frobenius norm of
             // `P_t - P_{t+1}` against `tolerance`, skipping t = 0 and any
             // period adjacent to a missing observation.
-            let adjacent_missing = missing || (t > 0 && !y[t - 1].is_finite());
+            let adjacent_missing = missing || (t > 0 && y[t - 1].is_nan());
             if time_invariant && t >= 1 && !adjacent_missing {
                 let mut sq = 0.0;
                 for i in 0..k * k {
@@ -391,6 +421,33 @@ pub fn kalman_filter(
         }
     }
 
+    // With the scale concentrated out, the filter above ran at `sigma2 = 1`,
+    // so `F_t` is in units of the scale and the maximising scale has a closed
+    // form: `s = (1/n) sum v_t^2 / F_t`. statsmodels' FILTER_CONCENTRATED does
+    // the same, and reports `params` without a `sigma2` entry.
+    let mut scale = 1.0;
+    if spec.concentrate_scale && loglike.is_finite() {
+        if n_eff > 0 {
+            scale = ssr / n_eff as f64;
+            let n = n_eff as f64;
+            loglike = -0.5 * (n * (LN_2PI + scale.ln() + 1.0) + sum_log_f);
+            if want_paths {
+                for t in 0..llobs.len() {
+                    llobs[t] = if fvar[t] > 0.0 && !resid[t].is_nan() && t >= spec.burn {
+                        -0.5 * (LN_2PI
+                            + scale.ln()
+                            + fvar[t].ln()
+                            + resid[t] * resid[t] / (fvar[t] * scale))
+                    } else {
+                        0.0
+                    };
+                }
+            }
+        } else {
+            loglike = 0.0;
+        }
+    }
+
     FilterOut {
         loglike,
         fitted,
@@ -398,7 +455,9 @@ pub fn kalman_filter(
         fvar,
         llobs,
         ssr,
+        sum_log_f,
         n_eff,
+        scale,
         a_final: a,
         p_final: p,
     }

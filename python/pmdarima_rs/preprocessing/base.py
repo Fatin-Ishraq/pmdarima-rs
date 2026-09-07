@@ -5,12 +5,13 @@ import abc
 import numpy as np
 import pandas as pd
 
+from ..base import BaseEstimator, TransformerMixin
 from ..utils.array import check_endog, check_exog
 
 __all__ = ["BaseTransformer", "UpdatableMixin"]
 
 
-class BaseTransformer(abc.ABC):
+class BaseTransformer(BaseEstimator, TransformerMixin, metaclass=abc.ABCMeta):
     """Transforms `(y, X)` jointly and returns both.
 
     The two-argument signature is the whole point: an endogenous transform
@@ -50,8 +51,9 @@ class BaseTransformer(abc.ABC):
         return self
 
     def __repr__(self):
-        args = ", ".join(f"{k}={getattr(self, k)!r}" for k in self._param_names)
-        return f"{type(self).__name__}({args})"
+        from ..base import repr_with_defaults
+
+        return repr_with_defaults(self, self._param_names)
 
 
 class UpdatableMixin:

@@ -68,8 +68,19 @@ class LogEndogTransformer(BoxCoxEndogTransformer):
 
     def __init__(self, lmbda=0, neg_action="raise", floor=1e-16):
         super().__init__(neg_action=neg_action, floor=floor)
+        # See https://github.com/alkaline-ml/pmdarima/issues/407: the single
+        # `lmbda` argument here is the *shift*, not the Box-Cox power.
         self.lmbda = 0
         self.lmbda2 = lmbda
+
+    def fit(self, y, X=None, **kwargs):
+        return super().fit(y, X)
+
+    def transform(self, y, X=None, **transform_kwargs):
+        return super().transform(y, X, **transform_kwargs)
+
+    def inverse_transform(self, y, X=None, **kwargs):
+        return super().inverse_transform(y, X)
 
     def get_params(self, deep=True):
         params = {

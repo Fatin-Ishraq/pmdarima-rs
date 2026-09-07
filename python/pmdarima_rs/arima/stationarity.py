@@ -11,8 +11,11 @@ which this package is also licensed under, rather than reimplementations that
 would risk changing an answer to save nothing.
 """
 
+import warnings
+
 import numpy as np
 
+from ..base import BaseEstimator
 from ..utils.array import c, check_endog, diff  # noqa: F401  (re-exported use)
 
 __all__ = ["ADFTest", "KPSSTest", "PPTest"]
@@ -45,13 +48,18 @@ def pp_sum(u, n, l_, total):
     """
     u = np.asarray(u, dtype=float).ravel()
     for i in range(1, int(l_) + 1):
+        if i >= n:
+            # R's tseries stops at the end of the series; without this guard a
+            # short series with `lshort=False` slices past the end and numpy
+            # raises on the shape mismatch.
+            break
         tmp = float(np.dot(u[i:n], u[0 : n - i]))
         tmp *= 1.0 - i / (l_ + 1.0)
         total += 2.0 * tmp / n
     return total
 
 
-class _BaseStationarityTest:
+class _BaseStationarityTest(BaseEstimator):
     @staticmethod
     def _base_case(x):
         return x is not None and np.asarray(x).shape[0] != 0
@@ -68,14 +76,15 @@ class _BaseStationarityTest:
     def get_params(self, deep=True):
         return {k: getattr(self, k) for k in self._param_names}
 
-    def set_params(self, **kw):
-        for k, v in kw.items():
+    def set_params(self, **params):
+        for k, v in params.items():
             setattr(self, k, v)
         return self
 
     def __repr__(self):
-        args = ", ".join(f"{k}={getattr(self, k)!r}" for k in self._param_names)
-        return f"{type(self).__name__}({args})"
+        from ..base import repr_with_defaults
+
+        return repr_with_defaults(self, self._param_names)
 
 
 class _DifferencingStationarityTest(_BaseStationarityTest):
@@ -87,6 +96,12 @@ class _DifferencingStationarityTest(_BaseStationarityTest):
 
     def is_stationary(self, x):
         """Deprecated alias kept for compatibility with older `pmdarima`."""
+        warnings.warn(
+            "is_stationary is deprecated and will be removed in a future "
+            "release. Use should_diff instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.should_diff(x)
 
 
@@ -105,7 +120,7 @@ class KPSSTest(_DifferencingStationarityTest):
     def should_diff(self, x):
         if not self._base_case(x):
             return np.nan, False
-        x = check_endog(x, preserve_series=False)
+        x = check_endog(x, preserve_series=False, force_all_finite=True, input_name="y")
         n = x.shape[0]
 
         if self.null == "trend":
@@ -119,9 +134,10 @@ class KPSSTest(_DifferencingStationarityTest):
 
         # Ordinary least squares with an intercept, matching
         # sklearn.LinearRegression's default.
-        design = np.hstack([np.ones((n, 1)), t])
-        beta, *_ = np.linalg.lstsq(design, x, rcond=None)
-        e = x - design.dot(beta)
+        tc = t - t.mean(axis=0)
+        xc = x - x.mean()
+        beta, *_ = np.linalg.lstsq(tc, xc, rcond=None)
+        e = xc - tc.dot(beta)
 
         s = np.cumsum(e)
         eta = (s * s).sum() / (n**2)
@@ -190,15 +206,18 @@ class ADFTest(_DifferencingStationarityTest):
         resid = yt - X.dot(beta)
         dof = X.shape[0] - X.shape[1]
         sigma2 = resid.dot(resid) / dof
-        rinv = np.linalg.inv(r)
-        xtx_inv_diag = np.einsum("ij,ij->i", rinv, rinv)
-        se = np.sqrt(sigma2 * xtx_inv_diag)
+        # statsmodels' `OLS.fit(method="qr")` forms `inv(R'R)` and reads its
+        # diagonal. Doing the same arithmetic in the same order keeps the t
+        # statistic equal on badly scaled series, where the two algebraically
+        # identical routes drift apart.
+        cov_diag = np.diag(np.linalg.inv(r.T.dot(r)))
+        se = np.sqrt(sigma2 * cov_diag)
         return beta[1] / se[1]
 
     def should_diff(self, x):
         if not self._base_case(x):
             return np.nan, False
-        x = check_endog(x, preserve_series=False)
+        x = check_endog(x, preserve_series=False, force_all_finite=True)
 
         k = self.k
         if k is None:
@@ -250,7 +269,7 @@ class PPTest(_DifferencingStationarityTest):
     def should_diff(self, x):
         if not self._base_case(x):
             return np.nan, False
-        x = check_endog(x, preserve_series=False)
+        x = check_endog(x, preserve_series=False, force_all_finite=True, input_name="X")
 
         z = self._embed(x, 2)
         yt = z[0, :]
@@ -258,9 +277,11 @@ class PPTest(_DifferencingStationarityTest):
         n = yt.shape[0]
 
         tt = (np.arange(n) + 1) - (n / 2.0)
-        X = np.array([np.ones(n), tt, yt1]).T
-        beta, *_ = np.linalg.lstsq(X, yt, rcond=None)
-        u = yt - X.dot(beta)
+        X = np.column_stack([tt, yt1])
+        xc = X - X.mean(axis=0)
+        yc = yt - yt.mean()
+        beta, *_ = np.linalg.lstsq(xc, yc, rcond=None)
+        u = yc - xc.dot(beta)
 
         ssqru = (u * u).sum() / float(n)
         scalar = 4 if self.lshort else 12
@@ -275,7 +296,7 @@ class PPTest(_DifferencingStationarityTest):
         trm4 = (n * (n + 1) * (2 * n + 1) * (yt1.sum() ** 2)) / 6.0
         dx = trm1 - trm2 + trm3 - trm4
 
-        alpha = beta[2]
+        alpha = beta[1]
         stat = n * (alpha - 1) - (n**6) / (24.0 * dx) * (ssqrtl - ssqru)
 
         tableipl = np.array(

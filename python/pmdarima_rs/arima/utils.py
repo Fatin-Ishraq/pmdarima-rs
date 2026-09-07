@@ -33,11 +33,24 @@ def _get_callable(key, mapping):
     try:
         return mapping[key]
     except KeyError:
-        raise ValueError(f"key must be one of {set(mapping)}, but got {key!r}") from None
+        raise ValueError(
+            "key must be a string in one in %r, but got %r" % (mapping, key)
+        ) from None
 
 
 def is_constant(x):
-    x = np.asarray(x).ravel()
+    """Whether every element of `x` is the same.
+
+    `pmdarima` runs the input through `column_or_1d`, so a genuinely 2-D
+    array is an error rather than something to flatten.
+    """
+    x = np.asarray(x)
+    if x.ndim == 2 and x.shape[1] == 1:
+        x = x.ravel()
+    if x.ndim != 1:
+        raise ValueError(
+            f"y should be a 1d array, got an array of shape {x.shape} instead."
+        )
     return bool((x == x[0]).all())
 
 
@@ -66,11 +79,13 @@ def ndiffs(x, alpha=0.05, test="kpss", max_d=2, **kwargs):
                 return d - 1
     except np.linalg.LinAlgError as err:
         raise ValueError(
-            f"Encountered exception in stationarity test ({test!r}). This can "
-            "occur in seasonal settings when a large enough `m` coupled with a "
-            "large enough `D` difference the training array into too few "
-            f"samples for OLS (input contains {len(x)} samples). Try fitting "
-            "on a larger training size"
+            "Encountered exception in stationarity test (%r). "
+            "This can occur in seasonal settings when a large "
+            "enough `m` coupled with a large enough `D` difference "
+            "the training array into too few samples for OLS "
+            "(input contains %i samples). Try fitting on a larger "
+            "training size (raised from %s: %s)"
+            % (test, len(x), err.__class__.__name__, err)
         ) from err
     return d
 

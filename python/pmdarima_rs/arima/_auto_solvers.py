@@ -23,6 +23,7 @@ from datetime import datetime
 import numpy as np
 
 from ..warnings import ModelFitWarning
+from ..compat.statsmodels import check_seasonal_order
 from ._context import ContextStore, ContextType
 from .arima import ARIMA
 
@@ -129,7 +130,10 @@ def _sort_and_filter_fits(models):
     filtered = [(mod, ic) for mod, _, ic in models if mod is not None and np.isfinite(ic)]
     if not filtered:
         raise ValueError(
-            "Could not successfully fit a viable ARIMA model to input data."
+            "Could not successfully fit a viable ARIMA model "
+            "to input data.\nSee "
+            "http://alkaline-ml.com/pmdarima/no-successful-model.html "
+            "for more information on why this can happen."
         )
     sorted_res = sorted(filtered, key=lambda mod_ic: mod_ic[1])
     models, _ = zip(*sorted_res)
@@ -296,7 +300,9 @@ class _StepwiseFitWrapper:
     def _do_fit(self, order, seasonal_order, constant=None):
         if not self.seasonal:
             seasonal_order = (0, 0, 0, 0)
-        seasonal_order = tuple(seasonal_order)
+        # A null seasonal order with m == 1 means "not seasonal"; statsmodels
+        # rejects a periodicity of 1, and pmdarima reports (0, 0, 0, 0).
+        seasonal_order = check_seasonal_order(tuple(seasonal_order))
         if constant is None:
             constant = self.with_intercept
 

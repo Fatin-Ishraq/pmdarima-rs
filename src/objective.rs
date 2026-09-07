@@ -111,6 +111,7 @@ pub enum GradKind {
 /// models across cores, and nesting a parallel gradient inside that would
 /// oversubscribe. Fitting a single model has no such outer loop, so it takes
 /// the cores.
+#[allow(clippy::too_many_arguments)]
 pub fn loglike_and_grad(
     spec: &Spec,
     y: &[f64],

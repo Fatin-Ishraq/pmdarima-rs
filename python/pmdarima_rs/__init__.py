@@ -78,43 +78,124 @@ def show_versions():
         print("    sklearn: not installed")
 
 
-def install():
+#: The `pmdarima` API level this package implements. `install()` reports this
+#: as ``pmdarima.__version__`` so that version gates in code you cannot edit
+#: keep working; this package's own version stays on ``pmdarima_rs``.
+PMDARIMA_API_VERSION = "2.1.1"
+
+
+import types as _types
+
+
+class _AliasModule(_types.ModuleType):
+    """A stand-in module that forwards everything to the real one.
+
+    Used only for the top-level ``pmdarima`` alias, so that
+    ``pmdarima.__version__`` can report the API level while every other
+    attribute - classes included, so ``isinstance`` still works - is the very
+    same object this package exposes.
+    """
+
+    def __init__(self, name, target, **overrides):
+        super().__init__(name, target.__doc__)
+        object.__setattr__(self, "_alias_target", target)
+        object.__setattr__(self, "_alias_overrides", overrides)
+
+    def __getattr__(self, item):
+        # Only reached when the name is not in this module's own dict.
+        overrides = object.__getattribute__(self, "_alias_overrides")
+        if item in overrides:
+            return overrides[item]
+        return getattr(object.__getattribute__(self, "_alias_target"), item)
+
+    def __dir__(self):
+        target = object.__getattribute__(self, "_alias_target")
+        overrides = object.__getattribute__(self, "_alias_overrides")
+        return sorted(set(dir(target)) | set(overrides))
+
+
+def _submodule_names():
+    """Every importable submodule of this package, as dotted suffixes."""
+    import pkgutil
+
+    names = []
+    # Walk with the real prefix: pkgutil imports subpackages to descend into
+    # them, and a relative prefix makes that import fail silently, leaving
+    # most of the tree unaliased.
+    for info in pkgutil.walk_packages(__path__, prefix=__name__ + "."):
+        names.append(info.name[len(__name__) :])
+    return names
+
+
+def install(api_version=PMDARIMA_API_VERSION):
     """Alias this package into :data:`sys.modules` as ``pmdarima``.
 
     For code you cannot edit. After ``pmdarima_rs.install()``, an
-    ``import pmdarima`` anywhere in the process resolves here. Call it before
-    the first ``import pmdarima``; if the real package is already imported
-    this raises rather than leaving a half-patched module graph.
+    ``import pmdarima`` anywhere in the process resolves here - including
+    submodules that have not been imported yet, which are resolved on demand
+    by a finder installed on ``sys.meta_path``. Call it before the first
+    ``import pmdarima``; if the real package is already imported this raises
+    rather than leaving a half-patched module graph.
     """
+    import importlib
+    import importlib.abc
+    import importlib.util
     import sys
 
-    if "pmdarima" in sys.modules and sys.modules["pmdarima"] is not sys.modules[__name__]:
+    existing = sys.modules.get("pmdarima")
+    if existing is not None and getattr(existing, "__pmdarima_rs__", False) is not True:
         raise RuntimeError(
             "`pmdarima` is already imported; call install() before importing it"
         )
-    for name in (
-        "",
-        ".arima",
-        ".arima.arima",
-        ".arima.auto",
-        ".arima.seasonality",
-        ".arima.stationarity",
-        ".arima.utils",
-        ".context_managers",
-        ".datasets",
-        ".metrics",
-        ".model_selection",
-        ".pipeline",
-        ".preprocessing",
-        ".preprocessing.endog",
-        ".preprocessing.exog",
-        ".utils",
-        ".utils.array",
-    ):
-        mod = sys.modules.get(__name__ + name)
+
+    self = sys.modules[__name__]
+    alias = _AliasModule(
+        "pmdarima",
+        self,
+        __version__=api_version,
+        __pmdarima_rs__=True,
+        __pmdarima_rs_version__=__version__,
+    )
+    sys.modules["pmdarima"] = alias
+
+    # Alias everything that is already imported, so the common names resolve
+    # without going through the finder at all.
+    for suffix in _submodule_names():
+        if not suffix:
+            continue
+        mod = sys.modules.get(__name__ + suffix)
         if mod is not None:
-            sys.modules["pmdarima" + name] = mod
-    return sys.modules[__name__]
+            sys.modules["pmdarima" + suffix] = mod
+
+    class _AliasLoader(importlib.abc.Loader):
+        def __init__(self, module):
+            self._module = module
+
+        def create_module(self, spec):
+            return self._module
+
+        def exec_module(self, module):
+            pass
+
+    class _AliasFinder(importlib.abc.MetaPathFinder):
+        """Resolve any `pmdarima.*` import to the matching module here."""
+
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname != "pmdarima" and not fullname.startswith("pmdarima."):
+                return None
+            if fullname in sys.modules:
+                return None
+            mapped = __name__ + fullname[len("pmdarima") :]
+            try:
+                mod = importlib.import_module(mapped)
+            except ImportError:
+                return None
+            sys.modules[fullname] = mod
+            return importlib.util.spec_from_loader(fullname, _AliasLoader(mod))
+
+    if not any(isinstance(f, _AliasFinder) for f in sys.meta_path):
+        sys.meta_path.insert(0, _AliasFinder())
+    return alias
 
 
 __all__ = [
@@ -150,6 +231,7 @@ __all__ = [
     "except_and_reraise",
     "show_versions",
     "install",
+    "PMDARIMA_API_VERSION",
     # submodules
     "arima",
     "datasets",

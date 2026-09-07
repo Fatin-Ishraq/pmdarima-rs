@@ -17,6 +17,8 @@ import warnings
 
 import numpy as np
 
+from .warnings import EstimationWarning
+
 TREND_POWERS = {
     None: [],
     "n": [],
@@ -57,6 +59,8 @@ def lagmat(x, maxlag, trim="forward"):
     if orig_1d:
         x = x[:, None]
     nobs, nvar = x.shape
+    if maxlag >= nobs:
+        raise ValueError("maximum of maxlag should be < nobs")
     if maxlag == 0:
         return np.empty((nobs if trim in ("forward", "none") else nobs, 0))
     lm = np.zeros((nobs + maxlag, nvar * (maxlag + 1)))
@@ -97,7 +101,14 @@ def _seasonal_poly(n, periods):
 
 
 def _conditional_sum_squares(
-    endog, k_ar, polynomial_ar, k_ma, polynomial_ma, k_trend=0, trend_data=None
+    endog,
+    k_ar,
+    polynomial_ar,
+    k_ma,
+    polynomial_ma,
+    k_trend=0,
+    trend_data=None,
+    warning_description=None,
 ):
     """Port of `SARIMAX._conditional_sum_squares`.
 
@@ -138,6 +149,16 @@ def _conditional_sum_squares(
             params = np.linalg.pinv(X).dot(Y)
             residuals = Y - np.dot(X, params)
         except (ValueError, np.linalg.LinAlgError):
+            description = (
+                "" if warning_description is None else f" for {warning_description}"
+            )
+            warnings.warn(
+                "Too few observations to estimate starting parameters"
+                f"{description}. All parameters except for variances will be "
+                "set to zeros.",
+                EstimationWarning,
+                stacklevel=2,
+            )
             params = np.zeros(k_trend + k_ar + k_ma)
             if len(endog) == 0:
                 residuals = np.ones(k_params_ma * 2 + 1)
@@ -179,6 +200,7 @@ class Spec:
         enforce_stationarity=True,
         enforce_invertibility=True,
         concentrate_scale=False,
+        trend_offset=1,
     ):
         self.order = tuple(int(v) for v in order)
         so = tuple(seasonal_order)
@@ -187,11 +209,25 @@ class Spec:
         self.seasonal_order = tuple(int(v) for v in so)
         self.p, self.d, self.q = self.order
         self.bp, self.bd, self.bq, self.s = self.seasonal_order
+        if any(v < 0 for v in self.order):
+            raise ValueError("Terms in the order cannot be negative.")
+        if any(v < 0 for v in self.seasonal_order):
+            raise ValueError("Terms in the seasonal order cannot be negative.")
+        has_seasonal = self.bp > 0 or self.bd > 0 or self.bq > 0
+        if self.s == 0 and has_seasonal:
+            raise ValueError(
+                "Must include nonzero seasonal periodicity if including "
+                "seasonal AR, MA, or differencing."
+            )
         if self.s == 1:
-            # statsmodels treats m=1 as non-seasonal
-            self.bp = self.bd = self.bq = 0
+            # `auto_arima` carries `(0, 0, 0, 1)` around to mean "not
+            # seasonal", but statsmodels rejects a periodicity of 1 outright
+            # when there is anything seasonal to attach to it.
+            if has_seasonal:
+                raise ValueError("Seasonal periodicity must be greater than 1.")
             self.s = 0
         self.trend = trend
+        self.trend_offset = float(trend_offset)
         self.trend_powers = parse_trend(trend)
         self.k_trend = len(self.trend_powers)
         self.k_exog = int(k_exog)
@@ -238,9 +274,11 @@ class Spec:
             names.append("sigma2")
         return names
 
-    def trend_data(self, nobs, offset=1):
+    def trend_data(self, nobs, offset=None):
         if self.k_trend == 0:
             return None
+        if offset is None:
+            offset = self.trend_offset
         t = np.arange(offset, nobs + offset, dtype=float)
         return np.column_stack([t**pw for pw in self.trend_powers])
 
@@ -278,46 +316,74 @@ class Spec:
         poly_ar = np.r_[1.0, np.ones(self.p)] if self.p else np.r_[1.0]
         poly_ma = np.r_[1.0, np.ones(self.q)] if self.q else np.r_[1.0]
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            params_trend, params_ar, params_ma, params_variance = (
-                _conditional_sum_squares(
-                    e, self.k_ar, poly_ar, self.k_ma, poly_ma, self.k_trend, trend_data
-                )
+        params_trend, params_ar, params_ma, params_variance = (
+            _conditional_sum_squares(
+                e,
+                self.k_ar,
+                poly_ar,
+                self.k_ma,
+                poly_ma,
+                self.k_trend,
+                trend_data,
+                warning_description="ARMA and trend",
             )
+        )
 
         if (
             self.k_ar > 0
             and self.enforce_stationarity
             and not is_invertible(np.r_[1, -np.asarray(params_ar)])
         ):
+            warnings.warn(
+                "Non-stationary starting autoregressive parameters found. Using zeros as starting parameters.",
+                EstimationWarning,
+                stacklevel=2,
+            )
             params_ar = np.asarray(params_ar) * 0
         if (
             self.k_ma > 0
             and self.enforce_invertibility
             and not is_invertible(np.r_[1, np.asarray(params_ma)])
         ):
+            warnings.warn(
+                "Non-invertible starting MA parameters found. Using zeros as starting parameters.",
+                EstimationWarning,
+                stacklevel=2,
+            )
             params_ma = np.asarray(params_ma) * 0
 
         spoly_ar = _seasonal_poly(self.bp, self.s) if self.bp else np.r_[1.0]
         spoly_ma = _seasonal_poly(self.bq, self.s) if self.bq else np.r_[1.0]
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            _, params_sar, params_sma, params_svar = _conditional_sum_squares(
-                e, self.k_seasonal_ar, spoly_ar, self.k_seasonal_ma, spoly_ma
-            )
+        _, params_sar, params_sma, params_svar = _conditional_sum_squares(
+            e,
+            self.k_seasonal_ar,
+            spoly_ar,
+            self.k_seasonal_ma,
+            spoly_ma,
+            warning_description="seasonal ARMA",
+        )
 
         if (
             self.k_seasonal_ar > 0
             and self.enforce_stationarity
             and not is_invertible(np.r_[1, -np.asarray(params_sar)])
         ):
+            warnings.warn(
+                "Non-stationary starting seasonal autoregressive Using zeros as starting parameters.",
+                EstimationWarning,
+                stacklevel=2,
+            )
             params_sar = np.asarray(params_sar) * 0
         if (
             self.k_seasonal_ma > 0
             and self.enforce_invertibility
             and not is_invertible(np.r_[1, np.asarray(params_sma)])
         ):
+            warnings.warn(
+                "Non-invertible starting seasonal moving average Using zeros as starting parameters.",
+                EstimationWarning,
+                stacklevel=2,
+            )
             params_sma = np.asarray(params_sma) * 0
 
         if isinstance(params_variance, list) and len(params_variance) == 0:

@@ -9,6 +9,8 @@ import abc
 
 import numpy as np
 
+from ..base import BaseEstimator
+
 __all__ = [
     "check_cv",
     "train_test_split",
@@ -61,7 +63,7 @@ def train_test_split(*arrays, test_size=None, train_size=None):
     return out
 
 
-class BaseTSCrossValidator(abc.ABC):
+class BaseTSCrossValidator(BaseEstimator, metaclass=abc.ABCMeta):
     def __init__(self, h, step):
         if h < 1:
             raise ValueError("h must be a positive value")
@@ -73,18 +75,6 @@ class BaseTSCrossValidator(abc.ABC):
     @property
     def horizon(self):
         return self.h
-
-    def get_params(self, deep=True):
-        return {k: getattr(self, k) for k in self._param_names}
-
-    def set_params(self, **params):
-        for k, v in params.items():
-            setattr(self, k, v)
-        return self
-
-    def __repr__(self):
-        args = ", ".join(f"{k}={getattr(self, k)!r}" for k in self._param_names)
-        return f"{type(self).__name__}({args})"
 
     def split(self, y, X=None):
         y = np.asarray(y)
@@ -100,7 +90,6 @@ class BaseTSCrossValidator(abc.ABC):
 class RollingForecastCV(BaseTSCrossValidator):
     """An expanding training window with a fixed forecast horizon."""
 
-    _param_names = ("h", "step", "initial")
 
     def __init__(self, h=1, step=1, initial=None):
         super().__init__(h, step)
@@ -135,7 +124,6 @@ class RollingForecastCV(BaseTSCrossValidator):
 class SlidingWindowForecastCV(BaseTSCrossValidator):
     """A fixed-width training window that slides forward."""
 
-    _param_names = ("h", "step", "window_size")
 
     def __init__(self, h=1, step=1, window_size=None):
         super().__init__(h, step)

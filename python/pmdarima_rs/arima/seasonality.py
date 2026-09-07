@@ -17,7 +17,7 @@ import numpy as np
 from scipy.linalg import svd
 
 from .._ols import add_constant, ols
-from ..utils.array import c, check_endog, diff
+from ..utils.array import _assert_all_finite, c, check_endog, diff
 from .stationarity import _BaseStationarityTest
 
 __all__ = ["CHTest", "OCSBTest", "decompose"]
@@ -68,7 +68,9 @@ def decompose(x, type_, m, filter_=None):
         seasonal = seasonal[:-1]
 
     buffer = [np.nan] * half_m
-    trend = np.array(buffer + trend.tolist() + buffer)
+    # `pmdarima` hands the trend back as a list; callers index and
+    # concatenate it, and a numpy array behaves differently for both.
+    trend = list(buffer + trend.tolist() + buffer)
     random = helper(helper(x, trend), seasonal)
 
     decomposed = namedtuple("decomposed", "x trend seasonal random")
@@ -159,6 +161,7 @@ class CHTest(_SeasonalStationarityTest):
 
     @staticmethod
     def _sd_test(wts, s):
+        _assert_all_finite(wts)
         n = wts.shape[0]
         frec = np.ones(int((s + 1) / 2), dtype=np.intp)
         ltrunc = int(np.round(s * ((n / 100.0) ** 0.25)))
@@ -269,8 +272,10 @@ class OCSBTest(_SeasonalStationarityTest):
         y_first_order_diff = diff(x, m)
         if y_first_order_diff.shape[0] == 0:
             raise ValueError(
-                "There are no more samples after a first-order seasonal "
-                "differencing. Try a longer series or a smaller m."
+                "There are no more samples after a first-order "
+                "seasonal differencing. See http://alkaline-ml.com/pmdarima/"
+                "seasonal-differencing-issues.html for a more in-depth "
+                "explanation and potential work-arounds."
             )
         y = diff(y_first_order_diff)
         ylag = OCSBTest._gen_lags(y, lag)
@@ -301,6 +306,7 @@ class OCSBTest(_SeasonalStationarityTest):
         return ols(y, data)
 
     def _compute_test_statistic(self, x):
+        _assert_all_finite(x)
         m = self.m
         maxlag = self.max_lag
         method = self.lag_method
@@ -327,9 +333,10 @@ class OCSBTest(_SeasonalStationarityTest):
 
             if np.isnan(icvals).all():
                 raise ValueError(
-                    "All lag values up to 'maxlag' produced singular matrices. "
-                    "Consider a longer series, a different lag term, or a "
-                    "different test."
+                    "All lag values up to 'maxlag' produced "
+                    "singular matrices. Consider using a longer "
+                    "series, a different lag term or a different "
+                    "test."
                 )
             best_index = int(np.nanargmin(icvals))
             maxlag = best_index - 1
@@ -342,8 +349,9 @@ class OCSBTest(_SeasonalStationarityTest):
                 regression = crit_regression
             else:
                 raise ValueError(
-                    "Could not find a solution. Try a longer series, a "
-                    "different lag term, or a different test."
+                    "Could not find a solution. Try a longer "
+                    "series, different lag term, or a different "
+                    "test."
                 ) from err
 
         # R keeps only the z5 coefficient's t statistic.

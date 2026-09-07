@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 //! The SARIMAX state-space model and its Kalman filter.
 //!
 //! This reproduces the state space that `statsmodels` builds for
@@ -23,8 +24,9 @@
 
 use crate::poly::{constrain_stationary, polymul, seasonal_poly, simple_poly};
 
-/// `statsmodels` evaluates trend terms at `t + 1`, not `t`.
-pub const TREND_OFFSET: usize = 1;
+/// `statsmodels` evaluates trend terms at `t + trend_offset`, and its default
+/// offset is 1 rather than 0.
+pub const TREND_OFFSET: f64 = 1.0;
 
 /// A sparse row of the transition matrix: `(column, value)` pairs.
 pub type SparseRow = Vec<(usize, f64)>;
@@ -45,6 +47,9 @@ pub struct Spec {
     /// `[0, 1]` for `'ct'`, `[1]` for `'t'`.
     pub trend_powers: Vec<usize>,
     pub k_exog: usize,
+    /// The time index the trend polynomial starts from; `statsmodels` calls
+    /// this `trend_offset` and defaults it to 1.
+    pub trend_offset: f64,
     pub enforce_stationarity: bool,
     pub enforce_invertibility: bool,
     pub concentrate_scale: bool,
@@ -75,6 +80,7 @@ impl Spec {
         s: usize,
         trend_powers: Vec<usize>,
         k_exog: usize,
+        trend_offset: f64,
         enforce_stationarity: bool,
         enforce_invertibility: bool,
         concentrate_scale: bool,
@@ -95,6 +101,7 @@ impl Spec {
             k_trend: trend_powers.len(),
             trend_powers,
             k_exog,
+            trend_offset,
             enforce_stationarity,
             enforce_invertibility,
             concentrate_scale,
@@ -400,7 +407,7 @@ impl Spec {
             if varying {
                 let mut v = vec![0.0; nobs];
                 for (t, slot) in v.iter_mut().enumerate() {
-                    let base = (t + TREND_OFFSET) as f64;
+                    let base = t as f64 + self.trend_offset;
                     let mut acc = 0.0;
                     for (j, &pw) in self.trend_powers.iter().enumerate() {
                         acc += parts.trend[j] * base.powi(pw as i32);
