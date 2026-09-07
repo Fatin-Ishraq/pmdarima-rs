@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 583 372" width="583" height="372" role="img" aria-label="auto_arima on pmdarima's wineind dataset">
+  <title>auto_arima on pmdarima's wineind dataset</title>
+  <rect width="583" height="372" rx="12" fill="#0b1220"/>
+  <rect x="0.5" y="0.5" width="582" height="371" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
+  <path d="M0 42H583" stroke="#ffffff" stroke-opacity="0.08"/>
+  <circle cx="22" cy="21" r="6" fill="#f87171" fill-opacity="0.85"/><circle cx="42" cy="21" r="6" fill="#fbbf24" fill-opacity="0.85"/><circle cx="62" cy="21" r="6" fill="#4ade80" fill-opacity="0.85"/>
+  <text x="291" y="26" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">auto_arima on pmdarima's wineind dataset</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace" font-size="13">
+    <text x="22" y="77" xml:space="preserve"><tspan fill="#5eead4">$ </tspan><tspan fill="#e2e8f0">pip install pmdarima-rs</tspan></text>
+    <text x="22" y="97" xml:space="preserve"><tspan fill="#5eead4">$ </tspan><tspan fill="#e2e8f0">python</tspan></text>
+    <text x="22" y="117" xml:space="preserve"><tspan fill="#5eead4">&gt;&gt;&gt; </tspan><tspan fill="#e2e8f0">import pmdarima_rs as pm</tspan></text>
+    <text x="22" y="137" xml:space="preserve"><tspan fill="#5eead4">&gt;&gt;&gt; </tspan><tspan fill="#e2e8f0">y = pm.datasets.load_wineind()</tspan></text>
+    <text x="22" y="157" xml:space="preserve"><tspan fill="#5eead4">&gt;&gt;&gt; </tspan><tspan fill="#e2e8f0">model = pm.auto_arima(y, seasonal=True, m=12, trace=True)</tspan></text>
+    <text x="22" y="177" xml:space="preserve"><tspan fill="#cbd5e1">Performing stepwise search to minimize aic</tspan></text>
+    <text x="22" y="197" xml:space="preserve"><tspan fill="#64748b"> ARIMA(2,1,2)(1,1,1)[12]             : </tspan><tspan fill="#cbd5e1">AIC=3069.263</tspan><tspan fill="#64748b">, Time=0.05 sec</tspan></text>
+    <text x="22" y="217" xml:space="preserve"><tspan fill="#64748b"> ARIMA(0,1,0)(0,1,0)[12]             : </tspan><tspan fill="#cbd5e1">AIC=3131.408</tspan><tspan fill="#64748b">, Time=0.00 sec</tspan></text>
+    <text x="22" y="237" xml:space="preserve"><tspan fill="#64748b"> ARIMA(1,1,0)(1,1,0)[12]             : </tspan><tspan fill="#cbd5e1">AIC=3097.884</tspan><tspan fill="#64748b">, Time=0.01 sec</tspan></text>
+    <text x="22" y="257" xml:space="preserve"><tspan fill="#64748b"> ARIMA(0,1,1)(0,1,1)[12]             : </tspan><tspan fill="#cbd5e1">AIC=3066.329</tspan><tspan fill="#64748b">, Time=0.01 sec</tspan></text>
+    <text x="22" y="277" xml:space="preserve"><tspan fill="#cbd5e1">  ... 17 more candidates ...</tspan></text>
+    <text x="22" y="297" xml:space="preserve"><tspan fill="#cbd5e1">Best model:  </tspan><tspan fill="#fb923c">ARIMA(0,1,2)(0,1,1)[12]</tspan></text>
+    <text x="22" y="317" xml:space="preserve"><tspan fill="#5eead4">Total fit time: 0.681 seconds</tspan></text>
+    <text x="22" y="337" xml:space="preserve"><tspan fill="#5eead4">&gt;&gt;&gt; </tspan><tspan fill="#e2e8f0">model.predict(n_periods=3)</tspan></text>
+    <text x="22" y="357" xml:space="preserve"><tspan fill="#cbd5e1">array([21833.71615796, 26239.8485425 , 30813.84738945])</tspan></text>
+  </g>
+</svg>

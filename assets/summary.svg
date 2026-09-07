@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 729 497" width="729" height="497" role="img" aria-label="model.summary()">
+  <title>model.summary()</title>
+  <rect width="729" height="497" rx="12" fill="#0b1220"/>
+  <rect x="0.5" y="0.5" width="728" height="496" rx="11.5" fill="none" stroke="#ffffff" stroke-opacity="0.10"/>
+  <path d="M0 42H729" stroke="#ffffff" stroke-opacity="0.08"/>
+  <circle cx="22" cy="21" r="6" fill="#f87171" fill-opacity="0.85"/><circle cx="42" cy="21" r="6" fill="#fbbf24" fill-opacity="0.85"/><circle cx="62" cy="21" r="6" fill="#4ade80" fill-opacity="0.85"/>
+  <text x="364" y="26" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">model.summary()</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace" font-size="12">
+    <text x="22" y="76" xml:space="preserve"><tspan fill="#5eead4">&gt;&gt;&gt; </tspan><tspan fill="#e2e8f0">model.summary()</tspan></text>
+    <text x="22" y="93" xml:space="preserve"><tspan fill="#cbd5e1">                                  SARIMAX Results</tspan></text>
+    <text x="22" y="110" xml:space="preserve"><tspan fill="#64748b">====================================================================================</tspan></text>
+    <text x="22" y="127" xml:space="preserve"><tspan fill="#cbd5e1">Dep. Variable:    y                                No. Observations:        176</tspan></text>
+    <text x="22" y="144" xml:space="preserve"><tspan fill="#cbd5e1">Model:            SARIMAX(0, 1, 2)x(0, 1, 1, 12)   Log Likelihood     -1528.766</tspan></text>
+    <text x="22" y="161" xml:space="preserve"><tspan fill="#cbd5e1">Date:             Mon, 07 Sep 2026                 AIC                 3065.533</tspan></text>
+    <text x="22" y="178" xml:space="preserve"><tspan fill="#cbd5e1">Time:             16:55:00                         BIC                 3077.908</tspan></text>
+    <text x="22" y="195" xml:space="preserve"><tspan fill="#cbd5e1">Sample:           0                                HQIC                3070.557</tspan></text>
+    <text x="22" y="212" xml:space="preserve"><tspan fill="#cbd5e1">                  - 176</tspan></text>
+    <text x="22" y="229" xml:space="preserve"><tspan fill="#cbd5e1">Covariance Type:  opg</tspan></text>
+    <text x="22" y="246" xml:space="preserve"><tspan fill="#64748b">====================================================================================</tspan></text>
+    <text x="22" y="263" xml:space="preserve"><tspan fill="#cbd5e1">                       coef     std err         z    P&gt;|z|       [0.025       0.975]</tspan></text>
+    <text x="22" y="280" xml:space="preserve"><tspan fill="#64748b">------------------------------------------------------------------------------------</tspan></text>
+    <text x="22" y="297" xml:space="preserve"><tspan fill="#cbd5e1">         ma.L1      -0.5756      0.0413  -13.9522   0.0000      -0.6564      -0.4947</tspan></text>
+    <text x="22" y="314" xml:space="preserve"><tspan fill="#cbd5e1">         ma.L2      -0.1065      0.0479   -2.2244   0.0261      -0.2003      -0.0127</tspan></text>
+    <text x="22" y="331" xml:space="preserve"><tspan fill="#cbd5e1">      ma.S.L12      -0.3848      0.0538   -7.1565   0.0000      -0.4902      -0.2794</tspan></text>
+    <text x="22" y="348" xml:space="preserve"><tspan fill="#cbd5e1">        sigma2 7865807.8966 700580.0203   11.2276   0.0000 6492696.2885 9238919.5047</tspan></text>
+    <text x="22" y="365" xml:space="preserve"><tspan fill="#64748b">====================================================================================</tspan></text>
+    <text x="22" y="382" xml:space="preserve"><tspan fill="#cbd5e1">Ljung-Box (L1) (Q):           2.84   Jarque-Bera (JB):        18.05</tspan></text>
+    <text x="22" y="399" xml:space="preserve"><tspan fill="#cbd5e1">Prob(Q):                      0.09   Prob(JB):                 0.00</tspan></text>
+    <text x="22" y="416" xml:space="preserve"><tspan fill="#cbd5e1">Heteroskedasticity (H):       1.17   Skew:                    -0.55</tspan></text>
+    <text x="22" y="433" xml:space="preserve"><tspan fill="#cbd5e1">Prob(H) (two-sided):          0.56   Kurtosis:                 4.21</tspan></text>
+    <text x="22" y="450" xml:space="preserve"><tspan fill="#64748b">====================================================================================</tspan></text>
+    <text x="22" y="467" xml:space="preserve"></text>
+    <text x="22" y="484" xml:space="preserve"><tspan fill="#cbd5e1">[1] Covariance matrix calculated using the outer product of gradients (central difference).</tspan></text>
+  </g>
+</svg>

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 340" width="1280" height="340" role="img" aria-label="pmdarima-rs — drop-in ARIMA and auto-ARIMA for Python, 9 to 30 times faster, powered by Rust">
+  <title>pmdarima-rs — drop-in ARIMA and auto-ARIMA for Python, powered by Rust</title>
+  <defs>
+    <linearGradient id="pbg" x1="0" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#16203a"/>
+      <stop offset="1" stop-color="#080e1b"/>
+    </linearGradient>
+    <linearGradient id="bhist" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#7dd3fc"/>
+    </linearGradient>
+    <linearGradient id="bcone" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fb923c" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#fb923c" stop-opacity="0.13"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="0.38" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="1"/>
+    </linearGradient>
+    <mask id="fademask">
+      <rect x="700" y="0" width="580" height="340" fill="url(#fade)"/>
+    </mask>
+    <g id="markg">
+      <path d="M140 104 L220 24 L220 148 Z" fill="url(#bcone)"/>
+      <polyline points="38,178 62,146 86,160 110,118 128,132 140,104"
+                fill="none" stroke="url(#bhist)" stroke-width="15"
+                stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M140 104 L220 68" fill="none" stroke="#fb923c" stroke-width="15"
+            stroke-linecap="round" stroke-dasharray="2 27"/>
+      <circle cx="140" cy="104" r="13" fill="#0b1220" stroke="#fb923c" stroke-width="9"/>
+    </g>
+  </defs>
+
+  <rect width="1280" height="340" rx="22" fill="url(#pbg)"/>
+
+  <!-- decorative series, right column -->
+  <g mask="url(#fademask)" opacity="0.62">
+    <g stroke="#ffffff" stroke-opacity="0.045" stroke-width="1">
+      <path d="M700 92 H1216 M700 148 H1216 M700 204 H1216 M700 260 H1216"/>
+    </g>
+    <path d="M1012 168 L1216 104 L1216 250 Z" fill="url(#bcone)"/>
+    <polyline points="712,248 738,214 764,232 790,190 816,208 842,164 868,186 894,232 920,190 946,206 972,160 998,184 1012,168"
+              fill="none" stroke="url(#bhist)" stroke-width="3.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M1012 168 L1216 148" fill="none" stroke="#fb923c" stroke-width="3.5"
+          stroke-linecap="round" stroke-dasharray="0.5 8"/>
+    <circle cx="1012" cy="168" r="5" fill="#0b1220" stroke="#fb923c" stroke-width="3"/>
+  </g>
+
+  <use href="#markg" transform="translate(60, 78) scale(0.40)"/>
+
+  <g font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+    <text x="168" y="150" font-size="58" font-weight="700" fill="#e2e8f0" letter-spacing="-1.4">pmdarima<tspan fill="#fb923c">-rs</tspan></text>
+    <text x="172" y="194" font-size="22" fill="#94a3b8">Drop-in ARIMA and auto-ARIMA for Python.</text>
+    <text x="172" y="226" font-size="22" fill="#94a3b8"><tspan fill="#5eead4" font-weight="600">9–30× faster</tspan>, powered by Rust.</text>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="20">
+    <rect x="170" y="254" width="368" height="44" rx="9" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.09"/>
+    <text x="190" y="282" fill="#64748b">import pmdarima<tspan fill="#fb923c">_rs</tspan> as <tspan fill="#e2e8f0">pm</tspan></text>
+  </g>
+</svg>

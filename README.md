@@ -1,293 +1,110 @@
-# pmdarima-rs
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Fatin-Ishraq/pmdarima-rs/main/assets/banner.svg" alt="pmdarima-rs" width="820">
 
 [![CI](https://github.com/Fatin-Ishraq/pmdarima-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Fatin-Ishraq/pmdarima-rs/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%20--%203.14-blue.svg)](https://pypi.org/project/pmdarima-rs/)
+[![PyPI](https://img.shields.io/pypi/v/pmdarima-rs.svg?color=fb923c)](https://pypi.org/project/pmdarima-rs/)
+[![Python](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.14-5eead4.svg)](https://pypi.org/project/pmdarima-rs/)
+[![License](https://img.shields.io/badge/license-MIT-94a3b8.svg)](https://github.com/Fatin-Ishraq/pmdarima-rs/blob/main/LICENSE)
 
-Fast, drop-in ARIMA and auto-ARIMA for Python, powered by Rust.
+**A drop-in replacement for [`pmdarima`](https://github.com/alkaline-ml/pmdarima)** —
+the same `auto_arima`, the same `ARIMA`, the same arguments and the same
+selected orders, with the Kalman filter rewritten in Rust.
+
+</div>
+
+---
+
+## Install
+
+```bash
+pip install pmdarima-rs
+```
+
+Prebuilt wheels for Linux, macOS and Windows, **Python 3.10 through 3.14**
+from a single `abi3` wheel per platform. No compiler needed, no Rust toolchain
+needed.
+
+## Switch
+
+Change one import.
 
 ```diff
 - import pmdarima as pm
 + import pmdarima_rs as pm
 ```
 
-That is the whole migration. Same classes, same arguments, same selected
-orders.
+That is the whole migration. If you cannot edit the code that imports
+`pmdarima` — someone else's library, a notebook you were handed, a vendored
+script — [alias it instead](#for-code-you-cannot-edit).
+
+## Use it
+
+Everything works the way it does in `pmdarima`, because it is the same API.
+
+```python
+import pmdarima_rs as pm
+
+y = pm.datasets.load_wineind()
+model = pm.auto_arima(y, seasonal=True, m=12, trace=True)
+
+forecast, ci = model.predict(n_periods=12, return_conf_int=True)
+print(model.summary())
+```
+
+<img src="https://raw.githubusercontent.com/Fatin-Ishraq/pmdarima-rs/main/assets/quickstart.svg" alt="auto_arima searching 21 candidate models on the wineind dataset and finishing in 0.7 seconds" width="620">
+
+<img src="https://raw.githubusercontent.com/Fatin-Ishraq/pmdarima-rs/main/assets/forecast.png" alt="wineind observed series and a 24-period forecast with a 95% interval" width="820">
+
+The `summary()` table is `statsmodels`' own layout, and every figure in it —
+coefficients, standard errors, information criteria, the Ljung-Box and
+Jarque-Bera block — is checked against `statsmodels` in the test suite.
+
+<details>
+<summary><b>See the full summary output</b></summary>
+
+<img src="https://raw.githubusercontent.com/Fatin-Ishraq/pmdarima-rs/main/assets/summary.svg" alt="SARIMAX results table" width="760">
+
+</details>
+
+## Speed
+
+<img src="https://raw.githubusercontent.com/Fatin-Ishraq/pmdarima-rs/main/assets/speedup.svg" alt="auto_arima speedup by dataset, 8.9x to 29.5x, same order selected on all ten" width="880">
 
 | workload | `pmdarima` | `pmdarima-rs` | |
 |---|---:|---:|---|
-| `auto_arima` on all 10 bundled datasets | 96.2 s | 5.0 s | **19.4x**, 10/10 identical orders |
-| fitting 6 known specifications | 5.17 s | 0.20 s | **26.0x**, identical AIC |
-| 40 seasonal series, one model each | 18.6 min | 1.8 min | **10.3x** |
-| one likelihood evaluation | 0.5-17 ms | 0.02-3.4 ms | **4.2x - 31.7x** |
+| `auto_arima` on all 10 bundled datasets | 58.7 s | 3.7 s | **16.0×**, 10/10 identical orders |
+| fitting 6 known specifications | 6.94 s | 0.35 s | **20.0×**, identical AIC |
+| 40 seasonal series, one model each | 17.2 min | 1.8 min | **9.6×** |
+| one likelihood evaluation | 0.7–25 ms | 0.02–3.7 ms | **5.4× – 39.6×** |
 
-Verified before it is timed: every benchmark row checks agreement first, so a
-fast wrong answer cannot appear in the table.
+**Every row is checked for agreement before it is timed**, so a fast wrong
+answer cannot appear in the table. `pmdarima`'s filter is already compiled —
+it is Cython — so this is not "Python versus native"; the wins are
+algorithmic, and [docs/DESIGN.md](https://github.com/Fatin-Ishraq/pmdarima-rs/blob/main/docs/DESIGN.md) says what they are.
 
-```bash
-pip install pmdarima-rs
-```
+These are one machine's numbers and they are noisy: repeat runs move the
+totals by 15–20% and individual rows by more. What holds across runs is the
+order of magnitude and the agreement. Every measurement, and how to reproduce
+it, is in [docs/BENCHMARKS.md](https://github.com/Fatin-Ishraq/pmdarima-rs/blob/main/docs/BENCHMARKS.md).
 
-Supports **Python 3.10 through 3.14** from a single `abi3` wheel per platform.
+## Accuracy
 
-It also has a shorter dependency list than the library it replaces: numpy,
-pandas and scipy. `pmdarima` additionally requires `statsmodels`,
-`scikit-learn`, `joblib`, `Cython` and `setuptools`; none of those are needed
-here. `matplotlib` is imported lazily inside the plotting helpers, so it stays
-optional (`pip install pmdarima-rs[plot]`).
+The claim is not "similar results".
 
-## Why it is faster
+| what | agreement |
+|---|---|
+| loglikelihood, 120 fuzzed specifications | worst relative error **1.7e-9** |
+| loglikelihood on series containing NaN | **1e-10** |
+| `SARIMAX.start_params`, 27 specifications | **exact** |
+| ADF / KPSS / PP / CH / OCSB / `ndiffs` / `nsdiffs` | **1,920 checks, 0 mismatches** |
+| `auto_arima` order on the 10 real datasets | **10/10 identical** |
 
-`pmdarima` wraps `statsmodels`' SARIMAX, and a profile of one seasonal
-`auto_arima` fit — 55 seconds of wall clock for a single 600-point series —
-puts essentially all of it in two places:
-
-| where | cost | why |
-|---|---|---|
-| `kalman_filter._filter` | 12,387 calls, **9.8 ms each** | a **dense** filter: `T P T'` costs `O(k³)` |
-| `scipy._numdiff._dense_difference` | 1,241 gradients, **12,193 likelihood calls** | no analytic gradient, so each gradient is `n_params + 1` filter passes |
-
-The filter is already compiled — it is Cython — so this is not "Python versus
-native". The wins had to be algorithmic.
-
-**The transition matrix is almost entirely structure.** A SARIMAX transition
-is a companion matrix (a superdiagonal identity plus one column of AR
-coefficients), a handful of ones for the differencing states, a 0/1 design
-vector, and a single-column selection matrix. Held as sparse rows, `T P T'`
-costs `O(k²)` instead of `O(k³)`. For a seasonal model with `m = 12` the state
-dimension is around 27, so that is most of the arithmetic gone before any
-micro-optimisation.
-
-**The observation is univariate.** `Z P Z'` is a scalar, so the matrix
-inversion at the heart of a general filter becomes one divide and the Kalman
-gain is a vector rather than a matrix.
-
-**The initial covariance does not need a `k² × k²` solve.** The stationary
-block solves a discrete Lyapunov equation; `statsmodels` reaches for a general
-solver that forms and factors the Kronecker system — the reason
-`_initialize_state` is 12% of the profile. Squaring converges quadratically
-and never leaves `k × k`. The stationary initial *mean* has a closed form for a
-companion matrix, so it is `O(r)` rather than a general `O(r³)` solve.
-
-**The gradient comes back in one call.** `statsmodels` asks `scipy` for
-`approx_grad=True`, so every gradient is `n_params + 1` separate Python round
-trips into the likelihood. Here the whole gradient is computed inside Rust,
-with the perturbations spread across cores and the GIL released.
-
-**The steady state is exploited.** For a time-invariant system the Riccati
-recursion converges, after which `P`, `F` and the gain stop changing;
-`statsmodels` detects this and freezes them, and so do we — which is required
-for the two to agree, and independently drops every step after convergence
-from `O(k²)` to `O(k)`.
-
-## Benchmarks
-
-All figures below come from `python bench/bench.py` on an AMD Ryzen 5 5600G
-(6 cores / 12 threads), Python 3.14.3, `pmdarima` 2.1.1, numpy 2.5.2. **Every
-row is checked for agreement before it is timed**, so a fast wrong answer
-cannot appear in these tables.
-
-### One likelihood evaluation (the inner loop)
-
-| n | order | seasonal | k | statsmodels | pmdarima-rs | speedup |
-|---|---|---|---:|---:|---:|---:|
-| 200 | (1, 1, 1) | (0, 0, 0, 0) | 3 | 0.530 ms | 0.017 ms | **31.7x** |
-| 600 | (2, 1, 2) | (0, 0, 0, 0) | 4 | 1.645 ms | 0.102 ms | **16.2x** |
-| 600 | (1, 1, 1) | (1, 1, 1, 12) | 27 | 5.220 ms | 0.861 ms | **6.1x** |
-| 600 | (2, 1, 2) | (2, 0, 2, 12) | 28 | 4.959 ms | 1.195 ms | **4.2x** |
-| 2000 | (2, 1, 2) | (2, 0, 2, 12) | 28 | 16.834 ms | 3.404 ms | **4.9x** |
-
-### Fitting a single known specification
-
-| series | order | seasonal | pmdarima | pmdarima-rs | speedup | d(AIC) |
-|---|---|---|---:|---:|---:|---:|
-| wineind | (2, 1, 1) | (0, 0, 0, 0) | 0.178 s | 0.013 s | **13.7x** | -0.000 |
-| wineind | (0, 1, 1) | (0, 1, 1, 12) | 0.168 s | 0.013 s | **13.3x** | +0.000 |
-| airpassengers | (2, 1, 1) | (0, 1, 0, 12) | 0.500 s | 0.038 s | **13.0x** | -0.000 |
-| ausbeer | (2, 1, 1) | (1, 1, 2, 4) | 0.891 s | 0.046 s | **19.5x** | -0.000 |
-| sunspots | (3, 1, 2) | (0, 0, 0, 0) | 1.995 s | 0.041 s | **48.4x** | +0.000 |
-| taylor | (5, 0, 1) | (0, 0, 0, 0) | 1.443 s | 0.048 s | **29.9x** | -0.000 |
-| **total** | | | **5.17 s** | **0.20 s** | **26.0x** | |
-
-### `auto_arima` on every dataset pmdarima ships
-
-| dataset | n | m | order | pmdarima | pmdarima-rs | speedup | same? |
-|---|---:|---:|---|---:|---:|---:|---|
-| wineind | 176 | 12 | (0, 1, 2)(0, 1, 1, 12) | 8.12 s | 0.85 s | **9.5x** | yes |
-| airpassengers | 144 | 12 | (2, 1, 1)(0, 1, 0, 12) | 8.15 s | 0.54 s | **15.2x** | yes |
-| ausbeer | 211 | 4 | (2, 1, 1)(1, 1, 2, 4) | 12.33 s | 0.69 s | **18.0x** | yes |
-| austres | 89 | 4 | (0, 2, 1)(1, 0, 0, 4) | 1.82 s | 0.13 s | **13.8x** | yes |
-| heartrate | 150 | 1 | (0, 2, 1) | 1.73 s | 0.13 s | **13.1x** | yes |
-| lynx | 114 | 1 | (2, 0, 0) | 1.09 s | 0.12 s | **9.3x** | yes |
-| woolyrnq | 119 | 4 | (3, 1, 2)(2, 0, 1, 4) | 23.53 s | 1.27 s | **18.5x** | yes |
-| sunspots | 1200 | 1 | (3, 1, 2) | 21.25 s | 0.61 s | **35.1x** | yes |
-| taylor | 1200 | 1 | (5, 0, 1) | 14.76 s | 0.48 s | **30.9x** | yes |
-| gasoline | 745 | 1 | (0, 1, 1) | 3.37 s | 0.15 s | **22.6x** | yes |
-| **total** | | | | **96.2 s** | **5.0 s** | **19.4x** | **10/10** |
-
-### 40 independent series, `auto_arima` on each (m=12, n=180)
-
-| metric | pmdarima | pmdarima-rs |
-|---|---:|---:|
-| wall clock | 1114.5 s | 107.9 s |
-| per series | 27862 ms | 2697 ms |
-| **speedup** | | **10.3x** |
-
-- identical order selected: **31/40**
-- AIC of our selected model vs theirs: median -0.00, better on 9, worse on 8
-
-The last table is the workload people actually run — one model per SKU — and
-it is also the honest one. On synthetic seasonal series the two searches pick
-the same order 31 times in 40. Where they differ, our AIC is better on 9 and
-worse on 8, median 0.00: the disagreement is a coin flip, not a degradation.
-
-The reason is the near-non-invertibility cutoff. `auto_arima` discards any
-candidate whose fitted inverse roots exceed 0.99, and seasonal ARIMA fits
-routinely land at 0.98-0.999. Two optimisers that agree on the likelihood to
-nine digits can still land on opposite sides of a hard threshold, and then
-the searches take different paths. On the ten real datasets — which is what
-users actually fit — this does not happen: **10/10 identical orders, identical
-AIC.**
-
-
-## Correctness
-
-The claim is not "similar results". Every number below is checked against
-`pmdarima` or `statsmodels` on the same input, and the tests are differential
-rather than golden-file.
-
-- **The likelihood matches evaluation for evaluation**, not just at the
-  optimum: 120 fuzzed specifications across random orders, lengths and
-  admissible parameter draws, worst relative error **1.7e-9**. A fit that
-  happens to land in the right place can hide a filter that is wrong
-  everywhere else, so the filter is compared directly.
-- **Series with holes match too.** A missing observation knocks the filter out
-  of its steady state - with nothing to correct against, `P` leaves the fixed
-  point the Riccati recursion had settled on and has to find it again - and
-  `statsmodels` drops its converged flag there for exactly that reason.
-  Reproducing that brings a NaN-bearing series back to **1e-10** agreement;
-  keeping the frozen covariance instead is wrong by several percent of the
-  loglikelihood, which is the kind of error that quietly changes a selected
-  order.
-- **Starting values are exact.** `SARIMAX.start_params` is reproduced
-  including its two-stage conditional-sum-of-squares regression and every
-  fallback — worst relative difference **0.0** across 27 specifications, short
-  series and the too-few-observations fallback included. This
-  matters more than it looks: ARIMA likelihoods are not concave, so a
-  different starting point can reach a different optimum and select a
-  different order.
-- **The unit-root and seasonality machinery is exact.** ADF, KPSS,
-  Phillips-Perron, Canova-Hansen, OCSB, `ndiffs` and `nsdiffs`: **1,920
-  differential checks, zero mismatches**.
-- **The public API is complete, and a test proves it.** For each module the
-  suite reads `pmdarima`'s own `__all__` and fails on any name we do not
-  provide. A drop-in missing one symbol is not a drop-in; it is a library that
-  breaks on the line you did not think to check.
-
-Where the two libraries genuinely differ, the difference is measured and
-written down rather than smoothed over.
-
-### We are more accurate in three places
-
-**Fourier terms.** `pmdarima` computes these in single precision, so its error
-grows with the time index. At `t = 174` with `m = 12, k = 4` the argument is an
-exact multiple of `2π`, so the sine must be zero: `pmdarima` returns `1.0e-5`,
-we return `6e-14`.
-
-**Standard errors, because of `sigma2`.** Fitting `(2,1,1)` to `wineind` puts
-`sigma2` near `2.9e7`. `statsmodels` differentiates its per-observation
-loglikelihood with a step that does not scale with the parameter, so at that
-magnitude the difference is pure round-off and the reported standard error
-comes back as `1.1e-4`. Recomputing the same outer-product-of-gradients
-estimator from `statsmodels`' *own* `loglikeobs` with a scaled step gives
-`3.79e6`, and complex step gives `3.68e6`. Both agree with us.
-
-That one bad row contaminates the whole covariance: `inv(G'G)` mixes the
-columns, so **every** standard error differs, not only `sigma2`'s — by around
-1-3% on `(2,1,1)`, and by up to 22% on a seasonal `(1,0,1)(1,0,1,4)` where
-`G'G` is badly conditioned to begin with. The `z`, `P>|z|` and `conf_int`
-columns of `summary()` move with them. Our score is taken by a five-point
-central difference with a step scaled to each parameter, which is the closest
-real-arithmetic stand-in for the complex step `statsmodels` uses.
-
-**Fitted optima, sometimes — but not dependably.** For `(1,1,1)(1,0,1,12)` on
-`wineind` this machine reports AIC 3380.5 for us against 3384.5 for
-`pmdarima`. Do not read that as a general result. Neither optimiser reaches
-the optimum on that spec at `maxiter=50` — it is near 3334, and both stop
-above 3380 still climbing. From there the landing point is chaotic: the two
-start from identical parameters and evaluate an identical likelihood, but 50
-L-BFGS iterations with differently-rounded finite-difference gradients
-diverge, and the LAPACK behind `pinv` differs by platform. Across CI the
-reference lands anywhere from 3339.6 to 3384.5 on that one spec while we sit
-at 3383, so on some machines it wins and on others we do.
-
-What *is* dependable, and is what the test suite asserts on every platform, is
-that each library's likelihood evaluated at the *other's* fitted parameters
-agrees to `1e-8`. That is the correctness property; which of two
-under-converged climbs stopped higher is not one. Where you want the optimum
-rather than the reference's stopping point, `restarts=3` reaches 3334 and
-converges — see the section above for why that is not the default.
-
-### One place agreement is limited, and why
-
-`statsmodels` stands in for an infinite prior variance on the differencing
-states with a large finite one (`1e6`). Forming `P − M M'/F` when `P` carries
-entries of `1e6` and the answer is of order `sigma2` cancels away roughly
-`log10(1e6 / sigma2)` significant digits. Both libraries pay that; they simply
-round it differently. Agreement is at machine precision for realistic
-`sigma2`, and degrades predictably as `sigma2` shrinks — a property of the
-model specification, not of either implementation, and one that lives far
-outside the region any optimiser visits. A test pins the behaviour so a real
-regression cannot hide inside it.
-
-## A deliberately *worse* optimiser, by default
-
-This package can fit a strictly better model than `pmdarima`: with central
-differences, a longer L-BFGS memory and restarts, it reached a higher
-likelihood on 15 of 27 fits and an identical one on 11, mean gain +7.0
-loglike.
-
-That is **not** the default, and the reason is worth stating.
-
-`auto_arima` discards any candidate whose fitted inverse roots exceed 0.99 as
-near-non-invertible. ARIMA likelihoods frequently have their maximum *at* that
-boundary, so a better gradient climbs closer to it and gets more candidates
-discarded — which changes which order is selected. Measured on one series,
-restarting bought 0.75 loglike, moved an MA inverse root from 0.9874 to
-0.9998, and ended the search on a model **24 AIC worse**. Climbing further up
-a ridge the caller is going to reject is not an improvement.
-
-So the default reproduces `statsmodels`' optimiser configuration — forward
-differences with `epsilon=1e-5`, `m=10`, no restarts — and the stronger
-settings are available per fit, for when you are estimating one specification
-you have already chosen:
-
-```python
-from pmdarima_rs import _fit
-from pmdarima_rs._ssm import Spec
-
-res = _fit.fit(Spec((2, 1, 1), (1, 0, 1, 12), "c"), y,
-               restarts=3, m=20, epsilon=None)   # central differences
-```
-
-## What is compiled, and what is not
-
-The compiled surface is deliberately small. Only the Kalman filter and the
-objective built on it run thousands of times per fitted model, so only those
-are in Rust. The order search, the unit-root tests, the estimator API and the
-preprocessing all run *once* per model and stay in Python, where fidelity to
-`pmdarima` is easy to see and to test.
-
-Those Python parts are faithful ports of the `pmdarima` originals (MIT, Taylor
-G. Smith et al.), which this package is also licensed under. The stepwise walk
-in particular *is* the algorithm — which neighbours are tried, in which order,
-and when the walk stops — so it is reproduced rather than reinterpreted.
-
-Two pieces had no Python original to port and are written out directly here:
-`C_canova_hansen_sd_test` (the Bartlett-weighted long-run covariance of the
-score contributions) and a small OLS providing `params`, `tvalues`, `aic` and
-`bic`, so the seasonality tests do not pull `statsmodels` back into a package
-whose point is not to need it.
+The tests are differential, not golden-file: they run `pmdarima` and this
+package on the same input and compare. Where the two genuinely differ — three
+places where we are *more* accurate, and a handful where a hard threshold
+makes the choice a coin flip — it is measured and written down in
+[docs/CORRECTNESS.md](https://github.com/Fatin-Ishraq/pmdarima-rs/blob/main/docs/CORRECTNESS.md) rather than smoothed over.
 
 ## For code you cannot edit
 
@@ -298,11 +115,11 @@ pmdarima_rs.install()      # before the first `import pmdarima`
 import pmdarima            # now resolves to pmdarima_rs
 ```
 
-Every submodule resolves too, including ones nothing has imported yet -
-`install()` puts a finder on `sys.meta_path`, so `import pmdarima.arima.utils`
-or `from pmdarima.datasets.wineind import load_wineind` gets the very same
-module object this package exposes. `isinstance` checks and pickles therefore
-still work across the alias.
+`install()` puts a finder on `sys.meta_path`, so every submodule resolves too,
+including ones nothing has imported yet: `import pmdarima.arima.utils` or
+`from pmdarima.datasets.wineind import load_wineind` gets the very same module
+object this package exposes. `isinstance` checks and pickles therefore still
+work across the alias.
 
 One attribute is deliberately not passed through: `pmdarima.__version__`
 reports the `pmdarima` API level this package implements (`2.1.1`), because
@@ -310,50 +127,90 @@ the code you cannot edit is exactly the code likely to gate on it. This
 package's own version stays available as `pmdarima.__pmdarima_rs_version__`
 and as `pmdarima_rs.__version__`.
 
+## What is included
+
+All of it. A test reads `pmdarima`'s own `__all__` for each module and fails
+on any name this package does not provide.
+
+| | |
+|---|---|
+| **Models** | `ARIMA`, `AutoARIMA`, `auto_arima`, `StepwiseContext`, `Pipeline` |
+| **Unit-root / seasonality** | `ADFTest`, `KPSSTest`, `PPTest`, `CHTest`, `OCSBTest`, `ndiffs`, `nsdiffs` |
+| **Preprocessing** | `FourierFeaturizer`, `BoxCoxEndogTransformer`, `LogEndogTransformer`, `DateFeaturizer` |
+| **Model selection** | `RollingForecastCV`, `SlidingWindowForecastCV`, `cross_val_score`, `cross_val_predict`, `cross_validate`, `train_test_split` |
+| **Utils** | `acf`, `pacf`, `diff`, `diff_inv`, `c`, `decompose`, `tsdisplay`, `plot_acf`, `plot_pacf`, `autocorr_plot` |
+| **Datasets** | all 11 — `wineind`, `airpassengers`, `ausbeer`, `austres`, `heartrate`, `lynx`, `woolyrnq`, `sunspots`, `taylor`, `gasoline`, `msft` |
+
+The estimators are real scikit-learn estimators when scikit-learn is
+installed, and use a local fallback base when it is not — so `clone`,
+`get_params`, `set_output` and metadata routing all work, without making
+scikit-learn a dependency.
+
+## Dependencies
+
+Three, against `pmdarima`'s eight.
+
+| | `pmdarima` | `pmdarima-rs` |
+|---|---|---|
+| required | numpy, pandas, scipy, **statsmodels, scikit-learn, joblib, Cython, setuptools** | numpy, pandas, scipy |
+| optional | — | matplotlib (`[plot]`), scikit-learn |
+
+`matplotlib` is imported lazily inside the plotting helpers, so it only has to
+be there if you call them.
+
 ## Limitations
 
-- `method` accepts the same nine solver names `statsmodels` does, and rejects
-  anything else with the same `ValueError`. Only `'lbfgs'` is implemented; the
-  other eight warn and fall back to it. It is `pmdarima`'s default and the
+- `method` accepts the same nine solver names `statsmodels` does and rejects
+  anything else with the same `ValueError`, but only `'lbfgs'` is implemented;
+  the other eight warn and fall back to it. It is `pmdarima`'s default and the
   only one its own `auto_arima` uses.
 - Five `SARIMAX` options raise `NotImplementedError` rather than being
   accepted and quietly ignored: `simple_differencing`, `measurement_error`,
   `time_varying_regression`, `mle_regression=False` and `use_exact_diffuse`.
   Each of them changes the model, so honouring the argument by ignoring it
   would report a different model's numbers under your specification. Every
-  other `SARIMAX` keyword is either implemented (`enforce_stationarity`,
-  `enforce_invertibility`, `concentrate_scale`, `trend_offset`) or genuinely
-  makes no difference to the likelihood (`hamilton_representation`), and an
-  unrecognised one is a `TypeError`, as it is in `statsmodels`.
-- Order selection agrees with `pmdarima` on real data (10/10). It can differ
-  on series whose fitted MA roots sit on the 0.99 rejection threshold, where
-  two optimisers agreeing on the likelihood to nine digits still land on
-  opposite sides of a hard cutoff. On 40 synthetic seasonal series the orders
-  agree 31 times; where they differ our AIC is better on 9 and worse on 8, so
-  the disagreement is a coin flip rather than a degradation. It is measured in
-  the benchmark rather than asserted away.
-- The 10/10 in that table is one machine's measurement, and the reference's
-  own selection is not platform-invariant. On `austres` both libraries fit
-  `(2,2,2)(1,0,1,4)` to a worst inverse root of 0.9911, exceed the 0.99
-  cutoff, discard it and settle on `(0,2,1)(1,0,0,4)` at AIC 651.95 — but on
-  one Windows and BLAS combination the reference lands at 0.9899 instead,
-  keeps the model and reports 650.27. Nothing separates those runs but
-  rounding in the third decimal of a root, and the flip is symmetric: either
-  library can be the one that keeps it. Our own selection was stable across
-  all nine CI platforms; the test suite compares that dataset on the
-  criterion rather than on the order, and the others on both.
-- The same coin flip is louder with `enforce_stationarity=False`, where
-  nothing keeps the roots inside the unit circle and the likelihood is flat
-  along several directions: on `wineind` the two searches part company at
-  `(3,1,2)` over a 0.17 AIC difference and end on different orders. Both
-  libraries evaluate the other's fitted parameters to the same loglikelihood,
-  so this is the optimiser's stopping point, not the filter.
+  other `SARIMAX` keyword is either implemented or genuinely makes no
+  difference to the likelihood, and an unrecognised one is a `TypeError`, as
+  it is in `statsmodels`.
+- Order selection agrees with `pmdarima` on real data (10/10) but can differ
+  on series whose fitted MA roots sit on `auto_arima`'s 0.99 rejection
+  threshold, where two optimisers agreeing to nine digits still land on
+  opposite sides of a hard cutoff. It is measured in the benchmark rather than
+  asserted away; details in [docs/CORRECTNESS.md](https://github.com/Fatin-Ishraq/pmdarima-rs/blob/main/docs/CORRECTNESS.md).
 - The stationary initial covariance is solved by squaring, which is far
   cheaper than the `k² × k²` factorisation it replaces but is still the
-  largest fixed cost per likelihood evaluation - about 0.17 ms of a 1.06 ms
-  seasonal call at `m = 12`. An `O(r²)` recursion using the ARMA
+  largest fixed cost per likelihood evaluation — roughly a sixth of a seasonal
+  call at `m = 12`. An `O(r²)` recursion using the ARMA
   autocovariances would remove most of that; it is the clearest remaining
   headroom and is not implemented.
+
+## Development
+
+```bash
+git clone https://github.com/Fatin-Ishraq/pmdarima-rs
+cd pmdarima-rs
+pip install maturin
+maturin develop --release
+
+pip install "pmdarima>=2.1.1" statsmodels pytest   # the reference to test against
+pytest tests/ -q
+cargo test --lib
+python bench/bench.py
+```
+
+The test suite skips its differential tests when `pmdarima` is not installed,
+so it still runs without the reference — it just checks less.
+
+## Documentation
+
+- [docs/DESIGN.md](https://github.com/Fatin-Ishraq/pmdarima-rs/blob/main/docs/DESIGN.md) — where the time went and what replaced it,
+  what is compiled and what is not
+- [docs/CORRECTNESS.md](https://github.com/Fatin-Ishraq/pmdarima-rs/blob/main/docs/CORRECTNESS.md) — what is verified, how, and every
+  known difference
+- [docs/BENCHMARKS.md](https://github.com/Fatin-Ishraq/pmdarima-rs/blob/main/docs/BENCHMARKS.md) — every measurement, and how to
+  reproduce it
+- `pmdarima`'s own [documentation](https://alkaline-ml.com/pmdarima/) applies
+  unchanged
 
 ## Licence
 
