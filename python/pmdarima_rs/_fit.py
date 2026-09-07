@@ -258,10 +258,18 @@ def fit(
     params = _rs.transform_params(np.ascontiguousarray(u_opt), **tk)
     ll = _rs.loglike(y, params, **kw)
 
-    # statsmodels reports the point the optimiser stopped at, and `pmdarima`
-    # compares information criteria across candidates on that basis. Silently
-    # substituting the starting values when they happen to score better would
-    # make this model incomparable with the reference for the same data.
+    # Return the best point that was actually evaluated.
+    #
+    # `statsmodels` reports wherever the optimiser stopped, even when that is
+    # below the point it started from - L-BFGS-B can end there on a badly
+    # conditioned likelihood, and short cross-validation folds hit it often.
+    # This is a deliberate deviation: the extra evaluation is one filter pass,
+    # and returning a strictly worse fit than one we have already computed
+    # would be a bug however faithfully it reproduced the reference.
+    ll0 = _rs.loglike(y, start_params, **kw)
+    if np.isfinite(ll0) and (not np.isfinite(ll) or ll0 > ll):
+        params, ll, u_opt = start_params, ll0, u0
+
     converged = info.get("warnflag", 1) == 0
     if not converged:
         warnings.warn(

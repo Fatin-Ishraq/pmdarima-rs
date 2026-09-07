@@ -63,7 +63,12 @@ impl Default for Opts {
 /// to. `statsmodels` raises for both of these, and so must we: with `s = 0`
 /// the seasonal state block has a zero-length stride and the index arithmetic
 /// that builds the transition matrix underflows.
-fn make_spec(
+///
+/// The validation is kept separate from the Python exception it turns into,
+/// so the unit tests can exercise it without an interpreter: a `cargo test`
+/// binary is not linked against libpython under the `extension-module`
+/// feature, and touching the runtime there fails to link.
+fn checked_spec(
     order: (usize, usize, usize),
     seasonal_order: (usize, usize, usize, usize),
     trend_powers: Vec<usize>,
@@ -99,6 +104,18 @@ fn make_spec(
         o.enforce_invertibility,
         o.concentrate_scale,
     ))
+}
+
+fn make_spec(
+    order: (usize, usize, usize),
+    seasonal_order: (usize, usize, usize, usize),
+    trend_powers: Vec<usize>,
+    k_exog: usize,
+    trend_offset: f64,
+    o: Opts,
+) -> PyResult<Spec> {
+    checked_spec(order, seasonal_order, trend_powers, k_exog, trend_offset, o)
+        .map_err(PyValueError::new_err)
 }
 
 fn check_params(spec: &Spec, params: &[f64], what: &str) -> PyResult<()> {
@@ -654,11 +671,10 @@ mod tests {
     #[test]
     fn seasonal_order_without_a_period_is_rejected() {
         let o = Opts::default();
-        pyo3::prepare_freethreaded_python();
-        assert!(make_spec((1, 0, 0), (1, 0, 0, 0), vec![], 0, 1.0, o).is_err());
-        assert!(make_spec((1, 0, 0), (0, 1, 0, 0), vec![], 0, 1.0, o).is_err());
-        assert!(make_spec((1, 0, 0), (1, 0, 0, 1), vec![], 0, 1.0, o).is_err());
-        assert!(make_spec((1, 0, 0), (0, 0, 0, 0), vec![], 0, 1.0, o).is_ok());
-        assert!(make_spec((1, 0, 0), (0, 0, 0, 12), vec![], 0, 1.0, o).is_ok());
+        assert!(checked_spec((1, 0, 0), (1, 0, 0, 0), vec![], 0, 1.0, o).is_err());
+        assert!(checked_spec((1, 0, 0), (0, 1, 0, 0), vec![], 0, 1.0, o).is_err());
+        assert!(checked_spec((1, 0, 0), (1, 0, 0, 1), vec![], 0, 1.0, o).is_err());
+        assert!(checked_spec((1, 0, 0), (0, 0, 0, 0), vec![], 0, 1.0, o).is_ok());
+        assert!(checked_spec((1, 0, 0), (0, 0, 0, 12), vec![], 0, 1.0, o).is_ok());
     }
 }
