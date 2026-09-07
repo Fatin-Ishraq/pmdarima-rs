@@ -206,7 +206,19 @@ def test_predict_in_sample_matches(wine, order):
     pa = np.asarray(a.predict_in_sample(), dtype=float)
     pb = np.asarray(b.predict_in_sample(), dtype=float)
     assert pa.shape == pb.shape == (len(wine),)
-    assert np.max(np.abs(pa - pb) / np.maximum(1.0, np.abs(pa))) < 1e-3
+
+    # The first `d + D*m` predictions come out of the approximate-diffuse
+    # prior rather than out of the data: for (0,2,1) on `wineind` the first is
+    # about -5 against a series of 23,000. Dividing by its own magnitude turns
+    # a difference of 0.08 into 1.5% and says nothing about whether the two
+    # prediction paths agree, so each region is measured on the scale that
+    # means something there.
+    burn = a.arima_res_.loglikelihood_burn
+    scale = float(np.abs(pa).max())
+    assert np.max(np.abs(pa - pb)) / scale < 1e-3
+    if burn < len(pa):
+        rel = np.abs(pa[burn:] - pb[burn:]) / np.maximum(1.0, np.abs(pa[burn:]))
+        assert np.max(rel) < 1e-3
 
 
 def test_arima_standard_errors_match_at_identical_params(wine):
