@@ -210,12 +210,23 @@ columns of `summary()` move with them. Our score is taken by a five-point
 central difference with a step scaled to each parameter, which is the closest
 real-arithmetic stand-in for the complex step `statsmodels` uses.
 
-**Fitted optima, sometimes.** For `(1,1,1)(1,0,1,12)` on `wineind`, both
-optimisers exhaust `maxiter=50` still climbing and ours ends 2.0 loglike
-higher — AIC 3380.5 against 3384.5. The test suite asserts our optimum is
-never materially *worse*, and separately asserts that each library's
-likelihood evaluated at the *other's* fitted parameters agrees to `1e-8`,
-which is the actual correctness property.
+**Fitted optima, sometimes — but not dependably.** For `(1,1,1)(1,0,1,12)` on
+`wineind` this machine reports AIC 3380.5 for us against 3384.5 for
+`pmdarima`. Do not read that as a general result. Neither optimiser reaches
+the optimum on that spec at `maxiter=50` — it is near 3334, and both stop
+above 3380 still climbing. From there the landing point is chaotic: the two
+start from identical parameters and evaluate an identical likelihood, but 50
+L-BFGS iterations with differently-rounded finite-difference gradients
+diverge, and the LAPACK behind `pinv` differs by platform. Across CI the
+reference lands anywhere from 3339.6 to 3384.5 on that one spec while we sit
+at 3383, so on some machines it wins and on others we do.
+
+What *is* dependable, and is what the test suite asserts on every platform, is
+that each library's likelihood evaluated at the *other's* fitted parameters
+agrees to `1e-8`. That is the correctness property; which of two
+under-converged climbs stopped higher is not one. Where you want the optimum
+rather than the reference's stopping point, `restarts=3` reaches 3334 and
+converges — see the section above for why that is not the default.
 
 ### One place agreement is limited, and why
 
@@ -321,6 +332,13 @@ and as `pmdarima_rs.__version__`.
   agree 31 times; where they differ our AIC is better on 9 and worse on 8, so
   the disagreement is a coin flip rather than a degradation. It is measured in
   the benchmark rather than asserted away.
+- The 10/10 in that table is one machine's measurement, and the reference's
+  own search is not platform-invariant. On `austres` under one Linux and BLAS
+  combination `pmdarima` selects `(2,2,2)` where every other platform gives it
+  `(0,2,1)(1,0,0,4)`, because a candidate fit lands either side of the 0.99
+  root-rejection cutoff. Our selection is stable across the nine CI platforms,
+  and where the two part company the test suite requires that ours is the
+  lower-AIC model.
 - The same coin flip is louder with `enforce_stationarity=False`, where
   nothing keeps the roots inside the unit circle and the likelihood is flat
   along several directions: on `wineind` the two searches part company at
