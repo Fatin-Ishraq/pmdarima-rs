@@ -11,8 +11,16 @@ repository = "https://github.com/Fatin-Ishraq/pmdarima-rs"
 name = "_pmdarima_rs"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# `extension-module` tells pyo3 *not* to link libpython, which is right for the
+# shared object a wheel ships and wrong for a `cargo test` binary - that one has
+# to link an interpreter to run at all. It is off by default and turned on for
+# wheels by `[tool.maturin] features` in pyproject.toml, so `cargo test` works
+# without a special invocation.
+extension-module = ["pyo3/extension-module"]
+
 [dependencies]
-pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
+pyo3 = { version = "0.23", features = ["abi3-py310"] }
 numpy = "0.23"
 rayon = "1.10"
 

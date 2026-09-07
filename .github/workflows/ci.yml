@@ -29,6 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The test binary links libpython (see the `extension-module` feature in
+      # Cargo.toml), so it needs an interpreter with its development library.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --lib
 
