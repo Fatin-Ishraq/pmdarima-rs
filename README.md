@@ -333,12 +333,15 @@ and as `pmdarima_rs.__version__`.
   the disagreement is a coin flip rather than a degradation. It is measured in
   the benchmark rather than asserted away.
 - The 10/10 in that table is one machine's measurement, and the reference's
-  own search is not platform-invariant. On `austres` under one Linux and BLAS
-  combination `pmdarima` selects `(2,2,2)` where every other platform gives it
-  `(0,2,1)(1,0,0,4)`, because a candidate fit lands either side of the 0.99
-  root-rejection cutoff. Our selection is stable across the nine CI platforms,
-  and where the two part company the test suite requires that ours is the
-  lower-AIC model.
+  own selection is not platform-invariant. On `austres` both libraries fit
+  `(2,2,2)(1,0,1,4)` to a worst inverse root of 0.9911, exceed the 0.99
+  cutoff, discard it and settle on `(0,2,1)(1,0,0,4)` at AIC 651.95 — but on
+  one Windows and BLAS combination the reference lands at 0.9899 instead,
+  keeps the model and reports 650.27. Nothing separates those runs but
+  rounding in the third decimal of a root, and the flip is symmetric: either
+  library can be the one that keeps it. Our own selection was stable across
+  all nine CI platforms; the test suite compares that dataset on the
+  criterion rather than on the order, and the others on both.
 - The same coin flip is louder with `enforce_stationarity=False`, where
   nothing keeps the roots inside the unit circle and the likelihood is flat
   along several directions: on `wineind` the two searches part company at
