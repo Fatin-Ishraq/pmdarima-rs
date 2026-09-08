@@ -10,6 +10,8 @@ comparing final fits, because a fit that happens to land in the same place can
 hide a filter that is wrong everywhere else.
 """
 
+import zlib
+
 import numpy as np
 import pytest
 
@@ -40,6 +42,42 @@ SPECS = [
     ((1, 0, 0), (0, 0, 0, 0), "t"),
     ((2, 1, 2), (2, 0, 2, 12), "c"),
 ]
+
+
+def seed_for(spec):
+    """A seed that does not move between processes.
+
+    `hash()` is salted per interpreter for anything containing a string, so
+    seeding from it made every trend-bearing specification draw a different
+    parameter set on each run - a fuzz test wearing a unit test's clothes.
+    `test_fuzz_random_orders` is where the fuzzing belongs; this file's job is
+    to check the same points every time.
+    """
+    return zlib.crc32(repr(spec).encode())
+
+
+def tolerance(order, sorder):
+    """How close the two implementations can get for this specification.
+
+    `statsmodels` stands in for an infinite prior variance on the differencing
+    states with a large finite one (`1e6`), and forming `P - M M'/F` against
+    that cancels away roughly `log10(1e6 / sigma2)` significant digits - see
+    `test_approximate_diffuse_conditioning`, which measures exactly this.
+
+    So the achievable agreement depends on the specification, and a single
+    flat bound is either too loose to catch anything on the well-conditioned
+    half or too tight to hold on the other - which is what a flat `1e-9` here
+    turned out to be, passing only until the reference's rounding shifted
+    under it.
+
+    With no differencing there is no diffuse block and the two track each
+    other to within round-off accumulated over the state and the sample; the
+    worst of those, over 400 admissible draws per specification, is 2.5e-13,
+    on the 26-state `(2,0,2)(2,0,2,12)`. With `d + D*m` diffuse states they
+    cannot do nearly that well: 1.7e-9 with thirteen of them. The second bound
+    is the one `test_fuzz_random_orders` already uses.
+    """
+    return 1e-12 if order[1] + sorder[1] * sorder[3] == 0 else 1e-8
 
 
 def make_series(rng, n):
@@ -79,15 +117,16 @@ def draw_params(rng, mod):
 
 @pytest.mark.parametrize("order,sorder,trend", SPECS)
 def test_matches_statsmodels(order, sorder, trend):
-    rng = np.random.default_rng(abs(hash((order, sorder, trend))) % (2**32))
+    rng = np.random.default_rng(seed_for((order, sorder, trend)))
     y = make_series(rng, 160)
     mod = sm.tsa.statespace.SARIMAX(y, order=order, seasonal_order=sorder, trend=trend)
+    tol = tolerance(order, sorder)
     for _ in range(12):
         p = draw_params(rng, mod)
         ref = mod.loglike(p)
         got = R.loglike(y, p, order, sorder, TREND_POWERS[trend])
         assert np.isfinite(got)
-        assert abs(got - ref) <= 1e-9 * max(1.0, abs(ref)), (
+        assert abs(got - ref) <= tol * max(1.0, abs(ref)), (
             f"{order} {sorder} {trend}: ref={ref!r} got={got!r}"
         )
 
@@ -117,7 +156,7 @@ def test_matches_across_series_lengths(n):
         p = draw_params(rng, mod)
         ref = mod.loglike(p)
         got = R.loglike(y, p, order, sorder, [0])
-        assert abs(got - ref) <= 1e-9 * max(1.0, abs(ref))
+        assert abs(got - ref) <= tolerance(order, sorder) * max(1.0, abs(ref))
 
 
 def test_fuzz_random_orders():

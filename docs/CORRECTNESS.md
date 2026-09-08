@@ -98,6 +98,15 @@ model specification, not of either implementation, and one that lives far
 outside the region any optimiser visits. A test pins the behaviour so a real
 regression cannot hide inside it.
 
+Because that loss is a property of the specification, the differential tests
+set their tolerance from the specification rather than using one flat number.
+Over 400 admissible parameter draws each: a model with no differencing agrees
+to 2.5e-13 at worst (on the 26-state `(2,0,2)(2,0,2,12)`, where the round-off
+is accumulation rather than cancellation), and one with thirteen diffuse
+states to 1.7e-9. A flat `1e-9` bound sat between those two and held only
+until a `statsmodels` release rounded differently, which is exactly the kind
+of test that fails without telling you anything.
+
 ## Known differences
 
 Everything in this list is deliberate and tested; none of it is a to-do.
